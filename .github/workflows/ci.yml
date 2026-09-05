@@ -63,4 +63,4 @@ jobs:
       - run: uv run bge-m3-lite --quiet download
       - run: uv run bge-m3-lite --quiet quantize
       - run: uv run python -c "import platform; print(platform.machine(), platform.processor())"; lscpu 2>/dev/null | grep -i -E "model name|flags" | cut -c1-200 || true
-      - run: uv run tools/eval_model.py ~/.cache/bge-m3-lite/BAAI--bge-m3/model.onnx ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx
+      - run: uv run tools/eval_model.py ~/.cache/bge-m3-lite/BAAI--bge-m3/model.onnx ~/.cache/bge-m3-lite/BAAI--bge-m3/model_fused.onnx ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx
