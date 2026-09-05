@@ -50,6 +50,7 @@ class QuantConfig:
     quantize_embeddings: bool = True  # also quantise the word-embedding Gather
     smooth_alpha: float | None = 0.5  # SmoothQuant strength, None = off
     calibration_max_length: int = 512
+    rowwise_zero_point: bool = False  # uint8 activations with a per-row zero point
     reduce_range: bool = False  # 7-bit weights: avoids u8s8 saturation on AVX2
     weight_uint8: bool = False  # u8u8 GEMM instead of u8s8
 
@@ -107,7 +108,12 @@ def quantize(
             tok = tokenizer_path or model_in.with_name("sentencepiece.bpe.model")
             stats = _activation_stats(model_in, model, texts, tok, config)
             _smooth(model, stats, config.smooth_alpha)
-        _quantize_rowwise(model, quantize_embeddings=config.quantize_embeddings)
+        _quantize_rowwise(
+            model,
+            quantize_embeddings=config.quantize_embeddings,
+            zero_point=config.rowwise_zero_point,
+            reduce_range=config.reduce_range,
+        )
         onnx.save_model(model, str(model_out))
     elif config.method == "dynamic":
         if config.smooth_alpha is not None and fused:
@@ -266,7 +272,13 @@ def _smooth(model: Any, stats: dict[str, np.ndarray], alpha: float) -> None:
 _QI8_MAX = 127.0
 
 
-def _quantize_rowwise(model: Any, *, quantize_embeddings: bool) -> None:
+def _quantize_rowwise(
+    model: Any,
+    *,
+    quantize_embeddings: bool,
+    zero_point: bool = False,
+    reduce_range: bool = False,
+) -> None:
     import onnx
     from onnx import helper, numpy_helper
 
@@ -280,9 +292,9 @@ def _quantize_rowwise(model: Any, *, quantize_embeddings: bool) -> None:
         return name
 
     c_i8max = const("rowwise/i8max", np.array(_QI8_MAX, dtype=np.float32))
+    c_u8max = const("rowwise/u8max", np.array(255.0, dtype=np.float32))
     c_eps = const("rowwise/eps", np.array(1e-10, dtype=np.float32))
-    c_lo = const("rowwise/lo", np.array(-_QI8_MAX, dtype=np.float32))
-    c_hi = const("rowwise/hi", np.array(_QI8_MAX, dtype=np.float32))
+    c_zero = const("rowwise/zero", np.array(0.0, dtype=np.float32))
     c_slice0 = const("rowwise/s0", np.array([0], dtype=np.int64))
     c_slice2 = const("rowwise/s2", np.array([2], dtype=np.int64))
 
@@ -290,38 +302,68 @@ def _quantize_rowwise(model: Any, *, quantize_embeddings: bool) -> None:
         """Nodes computing ``out = x @ W`` with per-row int8 activations."""
         w = numpy_helper.to_array(inits[w_name]).astype(np.float32)  # (K, N)
         k, n = w.shape
-        w_scale = np.maximum(np.abs(w).max(axis=0) / _QI8_MAX, 1e-12)
-        w_q = np.clip(np.round(w / w_scale), -_QI8_MAX, _QI8_MAX).astype(np.int8)
+        w_max = 63.0 if reduce_range else _QI8_MAX  # 7-bit: no u8s8 AVX2 overflow
+        w_scale = np.maximum(np.abs(w).max(axis=0) / w_max, 1e-12)
+        w_q = np.clip(np.round(w / w_scale), -w_max, w_max).astype(np.int8)
         inits[w_name].CopyFrom(numpy_helper.from_array(w_q, w_name))
         ws = const(f"{prefix}/w_scale", w_scale.astype(np.float32).reshape(1, n))
         shp = const(f"{prefix}/shape2d", np.array([-1, k], dtype=np.int64))
         n_const = const(f"{prefix}/n", np.array([n], dtype=np.int64))
         p = prefix
-        return [
-            helper.make_node("Reshape", [x, shp], [f"{p}/x2d"]),
-            helper.make_node("Abs", [f"{p}/x2d"], [f"{p}/abs"]),
-            helper.make_node(
-                "ReduceMax", [f"{p}/abs"], [f"{p}/amax"], axes=[1], keepdims=1
-            ),
-            helper.make_node("Div", [f"{p}/amax", c_i8max], [f"{p}/scale0"]),
-            helper.make_node("Max", [f"{p}/scale0", c_eps], [f"{p}/scale"]),
-            helper.make_node("Div", [f"{p}/x2d", f"{p}/scale"], [f"{p}/xs"]),
-            helper.make_node("Round", [f"{p}/xs"], [f"{p}/xr"]),
-            helper.make_node("Clip", [f"{p}/xr", c_lo, c_hi], [f"{p}/xc"]),
-            helper.make_node(
-                "Cast", [f"{p}/xc"], [f"{p}/xq"], to=onnx.TensorProto.INT8
-            ),
-            helper.make_node("MatMulInteger", [f"{p}/xq", w_name], [f"{p}/y32"]),
-            helper.make_node(
-                "Cast", [f"{p}/y32"], [f"{p}/yf"], to=onnx.TensorProto.FLOAT
-            ),
-            helper.make_node("Mul", [f"{p}/yf", f"{p}/scale"], [f"{p}/ys"]),
-            helper.make_node("Mul", [f"{p}/ys", ws], [f"{p}/y2d"]),
-            helper.make_node("Shape", [x], [f"{p}/xshape"]),
-            helper.make_node("Slice", [f"{p}/xshape", c_slice0, c_slice2], [f"{p}/bs"]),
-            helper.make_node("Concat", [f"{p}/bs", n_const], [f"{p}/yshape"], axis=0),
-            helper.make_node("Reshape", [f"{p}/y2d", f"{p}/yshape"], [out]),
+        mk = helper.make_node
+        nodes = [mk("Reshape", [x, shp], [f"{p}/x2d"])]
+        if zero_point:
+            # asymmetric: q = round(x / s) + z, x @ W = s * (q @ Wq - z * colsum(Wq))
+            colsum = const(
+                f"{p}/colsum",
+                w_q.astype(np.int32)
+                .sum(axis=0, dtype=np.int32)
+                .astype(np.float32)
+                .reshape(1, n),
+            )
+            nodes += [
+                mk("ReduceMax", [f"{p}/x2d"], [f"{p}/mx"], axes=[1], keepdims=1),
+                mk("ReduceMin", [f"{p}/x2d"], [f"{p}/mn0"], axes=[1], keepdims=1),
+                mk("Min", [f"{p}/mn0", c_zero], [f"{p}/mn"]),  # range must hold 0
+                mk("Max", [f"{p}/mx", c_zero], [f"{p}/mx0"]),
+                mk("Sub", [f"{p}/mx0", f"{p}/mn"], [f"{p}/range"]),
+                mk("Div", [f"{p}/range", c_u8max], [f"{p}/scale0"]),
+                mk("Max", [f"{p}/scale0", c_eps], [f"{p}/scale"]),
+                mk("Div", [f"{p}/mn", f"{p}/scale"], [f"{p}/negzp"]),
+                mk("Neg", [f"{p}/negzp"], [f"{p}/zp0"]),
+                mk("Round", [f"{p}/zp0"], [f"{p}/zp"]),  # (M, 1) in [0, 255]
+                mk("Div", [f"{p}/x2d", f"{p}/scale"], [f"{p}/xs"]),
+                mk("Round", [f"{p}/xs"], [f"{p}/xr"]),
+                mk("Add", [f"{p}/xr", f"{p}/zp"], [f"{p}/xz"]),
+                mk("Clip", [f"{p}/xz", c_zero, c_u8max], [f"{p}/xc"]),
+                mk("Cast", [f"{p}/xc"], [f"{p}/xq"], to=onnx.TensorProto.UINT8),
+                mk("MatMulInteger", [f"{p}/xq", w_name], [f"{p}/y32"]),
+                mk("Cast", [f"{p}/y32"], [f"{p}/yf"], to=onnx.TensorProto.FLOAT),
+                mk("Mul", [f"{p}/zp", colsum], [f"{p}/corr"]),
+                mk("Sub", [f"{p}/yf", f"{p}/corr"], [f"{p}/yc"]),
+                mk("Mul", [f"{p}/yc", f"{p}/scale"], [f"{p}/ys"]),
+            ]
+        else:
+            nodes += [
+                mk("Abs", [f"{p}/x2d"], [f"{p}/abs"]),
+                mk("ReduceMax", [f"{p}/abs"], [f"{p}/amax"], axes=[1], keepdims=1),
+                mk("Div", [f"{p}/amax", c_i8max], [f"{p}/scale0"]),
+                mk("Max", [f"{p}/scale0", c_eps], [f"{p}/scale"]),
+                mk("Div", [f"{p}/x2d", f"{p}/scale"], [f"{p}/xs"]),
+                mk("Round", [f"{p}/xs"], [f"{p}/xr"]),  # |xr| <= 127 by construction
+                mk("Cast", [f"{p}/xr"], [f"{p}/xq"], to=onnx.TensorProto.INT8),
+                mk("MatMulInteger", [f"{p}/xq", w_name], [f"{p}/y32"]),
+                mk("Cast", [f"{p}/y32"], [f"{p}/yf"], to=onnx.TensorProto.FLOAT),
+                mk("Mul", [f"{p}/yf", f"{p}/scale"], [f"{p}/ys"]),
+            ]
+        nodes += [
+            mk("Mul", [f"{p}/ys", ws], [f"{p}/y2d"]),
+            mk("Shape", [x], [f"{p}/xshape"]),
+            mk("Slice", [f"{p}/xshape", c_slice0, c_slice2], [f"{p}/bs"]),
+            mk("Concat", [f"{p}/bs", n_const], [f"{p}/yshape"], axis=0),
+            mk("Reshape", [f"{p}/y2d", f"{p}/yshape"], [out]),
         ]
+        return nodes
 
     for node in graph.node:
         if node.op_type == "MatMul" and node.input[1] in inits:
