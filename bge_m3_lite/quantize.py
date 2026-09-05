@@ -50,7 +50,7 @@ class QuantConfig:
     quantize_embeddings: bool = True  # also quantise the word-embedding Gather
     smooth_alpha: float | None = 0.5  # SmoothQuant strength, None = off
     calibration_max_length: int = 512
-    rowwise_zero_point: bool = False  # uint8 activations with a per-row zero point
+    rowwise_zero_point: bool = True  # uint8 activations with a per-row zero point
     reduce_range: bool = False  # 7-bit weights: avoids u8s8 saturation on AVX2
     weight_uint8: bool = False  # u8u8 GEMM instead of u8s8
 

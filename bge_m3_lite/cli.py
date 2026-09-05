@@ -47,7 +47,7 @@ def _cmd_quantize(args: argparse.Namespace) -> int:
         accuracy_level=args.accuracy_level,
         quantize_embeddings=not args.keep_embeddings,
         smooth_alpha=None if args.no_smooth else args.alpha,
-        rowwise_zero_point=args.zero_point,
+        rowwise_zero_point=not args.symmetric,
         reduce_range=args.reduce_range,
         weight_uint8=args.u8u8,
     )
@@ -180,7 +180,9 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--alpha", type=float, default=0.5, help="SmoothQuant strength")
     q.add_argument("--no-smooth", action="store_true", help="skip SmoothQuant")
     q.add_argument(
-        "--zero-point", action="store_true", help="rowwise: asymmetric uint8"
+        "--symmetric",
+        action="store_true",
+        help="rowwise: int8 activations without zero point (slow on x86)",
     )
     q.add_argument(
         "--reduce-range", action="store_true", help="7-bit weights (AVX2 safe)"

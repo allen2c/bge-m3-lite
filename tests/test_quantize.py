@@ -78,5 +78,79 @@ def test_cli_quantize_smooth_flags():
 
     args = build_parser().parse_args(["quantize"])
     assert args.method == "rowwise" and args.alpha == 0.5 and not args.no_smooth
+    assert not args.symmetric
     args = build_parser().parse_args(["quantize", "--method", "dynamic", "--no-smooth"])
     assert args.method == "dynamic" and args.no_smooth
+
+
+@pytest.mark.parametrize("zero_point", [False, True])
+def test_rowwise_matmul_and_attention(zero_point):
+    onnx = pytest.importorskip("onnx")
+    import numpy as np
+    import onnxruntime as ort
+    from onnx import helper, numpy_helper
+
+    from bge_m3_lite.quantize import _quantize_rowwise
+
+    rng = np.random.default_rng(1)
+    b, s, h, heads = 2, 6, 16, 2
+    w_qkv = (rng.standard_normal((h, 3 * h)) * 0.2).astype(np.float32)
+    bias = (rng.standard_normal((3 * h,)) * 0.1).astype(np.float32)
+    w_out = (rng.standard_normal((h, h)) * 0.2).astype(np.float32)
+    emb = rng.standard_normal((20000, h)).astype(np.float32)
+    graph = helper.make_graph(
+        [
+            helper.make_node("Gather", ["emb", "ids"], ["x"], name="embed/Gather"),
+            helper.make_node(
+                "Attention",
+                ["x", "w_qkv", "bias", "mask"],
+                ["a"],
+                name="Attention_0",
+                domain="com.microsoft",
+                num_heads=heads,
+            ),
+            helper.make_node(
+                "MatMul", ["a", "w_out"], ["y"], name="layer.0/output/dense/MatMul"
+            ),
+        ],
+        "g",
+        [
+            helper.make_tensor_value_info("ids", onnx.TensorProto.INT64, [b, s]),
+            helper.make_tensor_value_info("mask", onnx.TensorProto.INT32, [b, s]),
+        ],
+        [helper.make_tensor_value_info("y", onnx.TensorProto.FLOAT, [b, s, h])],
+        [
+            numpy_helper.from_array(emb, "emb"),
+            numpy_helper.from_array(w_qkv, "w_qkv"),
+            numpy_helper.from_array(bias, "bias"),
+            numpy_helper.from_array(w_out, "w_out"),
+        ],
+    )
+    model = helper.make_model(
+        graph,
+        opset_imports=[
+            helper.make_opsetid("", 13),
+            helper.make_opsetid("com.microsoft", 1),
+        ],
+    )
+    ids = rng.integers(0, 20000, (b, s)).astype(np.int64)
+    mask = np.array([[1] * s, [1] * 4 + [0] * 2], dtype=np.int32)
+    feeds = {"ids": ids, "mask": mask}
+    ref = np.asarray(
+        ort.InferenceSession(model.SerializeToString()).run(None, feeds)[0]
+    )
+    _quantize_rowwise(model, quantize_embeddings=True, zero_point=zero_point)
+    ops = {n.op_type for n in model.graph.node}
+    assert "MatMulInteger" in ops and "MultiHeadAttention" in ops
+    assert "Attention" not in ops and "MatMul" not in ops
+    assert all(
+        t.data_type != onnx.TensorProto.FLOAT
+        for t in model.graph.initializer
+        if t.name in ("emb", "w_qkv", "w_out")
+    )
+    out = np.asarray(
+        ort.InferenceSession(model.SerializeToString()).run(None, feeds)[0]
+    )
+    valid = mask.astype(bool)
+    rel = np.abs(out - ref)[valid].max() / np.abs(ref)[valid].max()
+    assert rel < 0.03  # int8 noise, not a structural error

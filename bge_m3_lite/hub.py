@@ -73,16 +73,16 @@ HEAD_FILES: tuple[RemoteFile, ...] = (
 )
 ALL_FILES = TOKENIZER_FILES + HEAD_FILES + MODEL_FILES
 
-# int8 backbone (SmoothQuant + dynamic per-channel quantisation of the fused
-# graph, built by ``bge-m3-lite quantize``, see docs/quantization.md). Hosted
+# int8 backbone (SmoothQuant + row-wise dynamic int8 of the fused graph,
+# built by ``bge-m3-lite quantize``, see docs/quantization.md). Hosted
 # as a GitHub release asset; override the URL with BGE_M3_LITE_INT8_URL or
 # build it locally into the cache.
-INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.3.0"
+INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.3.1"
 INT8_FILE = RemoteFile(
     "model_int8.onnx",
     f"{INT8_RELEASE}/model_int8.onnx",
-    569816526,
-    "7c0ad23f572c102a478060215f59c90949df0256e172b688671ec1376cfbf116",
+    596905791,
+    "25344e70ef7b9433de1d565e105971131b97c7a4e1f01c05c81aaf5395a4ce6b",
 )
 
 # Fused fp32 backbone (Attention / SkipLayerNorm / BiasGelu contrib ops, built by
