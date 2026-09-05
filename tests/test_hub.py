@@ -65,3 +65,12 @@ def test_stale_lock_is_removed(tmp_path):
     hub._acquire_lock(lock, timeout=5)
     assert lock.read_text() == str(hub.os.getpid())
     lock.unlink()
+
+
+def test_int8_url_override(monkeypatch):
+    assert hub.file_url(hub.INT8_FILE) == hub.INT8_FILE.remote_path
+    assert hub.file_url(hub.INT8_FILE).startswith("https://github.com/")
+    monkeypatch.setenv("BGE_M3_LITE_INT8_URL", "https://mirror.example/int8.onnx")
+    assert hub.file_url(hub.INT8_FILE) == "https://mirror.example/int8.onnx"
+    monkeypatch.setenv("HF_ENDPOINT", "https://hf.example")
+    assert hub.file_url(hub.TOKENIZER_FILES[0]).startswith("https://hf.example/BAAI")

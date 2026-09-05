@@ -27,4 +27,5 @@ BGE_M3_LITE_RUN_SLOW=1 uv run pytest -m slow    # full model (2.3 GB cache)
 - `docs/architecture.md` – modules, data flow, model files, verified facts
 - `docs/tokenizer.md` – how the from-scratch tokenizer matches transformers
 - `docs/verification.md` – accuracy, platforms, performance numbers
+- `docs/quantization.md` – int8 backbone: how it is built, measured trade-offs
 - `docs/development.md` – fixtures, CI, release, roadmap

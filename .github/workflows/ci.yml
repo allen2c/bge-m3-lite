@@ -48,3 +48,21 @@ jobs:
       - run: uv sync --group dev
       - run: uv run bge-m3-lite --quiet download
       - run: BGE_M3_LITE_RUN_SLOW=1 uv run pytest -q -m slow
+
+  bench:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --group dev --group quant
+      - run: uv run bge-m3-lite --quiet download
+      - run: uv run bge-m3-lite --quiet quantize
+      - run: uv run python -c "import platform; print(platform.machine(), platform.processor())"; lscpu 2>/dev/null | grep -i -E "model name|flags" | cut -c1-200 || true
+      - run: uv run tools/eval_model.py ~/.cache/bge-m3-lite/BAAI--bge-m3/model.onnx ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx

@@ -48,11 +48,20 @@ docker run --rm --platform linux/arm64 -v $PWD:/src:ro python:3.12-slim sh -c \
    Model files are not part of the wheel; they are pinned by revision + SHA-256
    in `hub.py`.
 
+## Release assets
+
+`model_int8.onnx` (543 MiB) is not on the Hub. Build it with
+`bge-m3-lite quantize`, check the printed SHA-256 against `hub.INT8_FILE`, and
+upload it to the GitHub release named in `hub.INT8_RELEASE`:
+
+```bash
+gh release create v0.0.2 ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx --title v0.0.2
+```
+
 ## Roadmap
 
-- v0.0.2: int8 dynamic quantisation of `model.onnx` as a build-time step,
-  validated against the same fixtures (watch sparse ordering), hosted as a
-  release asset; optional fp32/int8 switch.
+- Benchmark int8 on x86 (VNNI) and Linux ARM via the CI `bench` workflow.
 - Cache the ORT-optimised graph to cut the 3 s start-up.
+- Static/SmoothQuant calibration if int8 sparse ordering must improve.
 - Fused attention via `onnxruntime.transformers` at build time.
 - Rust/maturin kernels only if ORT int8 underperforms on Apple Silicon.

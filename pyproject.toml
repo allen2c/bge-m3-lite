@@ -4,7 +4,7 @@ requires = [ "uv-build>=0.8,<0.13" ]
 
 [project]
 name = "bge-m3-lite"
-version = "0.0.1"
+version = "0.0.2"
 description = """\
   Lightweight CPU inference for BAAI/bge-m3 (dense + sparse + ColBERT) with onnxruntime as the only dependency.\
   """
@@ -26,11 +26,13 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [ "onnxruntime>=1.17" ]
+optional-dependencies.quant = [ "onnx>=1.16", "onnx-ir", "sympy" ]
 urls.Homepage = "https://github.com/allenchou/bge-m3-lite"
 scripts.bge-m3-lite = "bge_m3_lite.cli:main"
 
 [dependency-groups]
 dev = [ "pyproject-fmt>=2", "pyright>=1.1", "pytest>=8", "ruff>=0.6" ]
+quant = [ "bge-m3-lite[quant]" ]
 # Heavy reference stack, only used by tools/ to regenerate test fixtures.
 ref = [ "flagembedding", "sentencepiece", "torch", "transformers" ]
 

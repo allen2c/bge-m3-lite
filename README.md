@@ -45,6 +45,8 @@ embedder.colbert_score(q_vecs, p_vecs)
 ```
 
 Passing a single string returns unwrapped values, like FlagEmbedding.
+`BGEM3Embedder(precision="int8")` loads a 4× smaller quantised backbone
+(see `docs/quantization.md` for the accuracy trade-off).
 
 ### CLI
 
@@ -72,5 +74,4 @@ See `AGENTS.md` and `docs/` (architecture, tokenizer, verification, development)
 
 ## Status
 
-v0.0.1: fp32, exact parity with FlagEmbedding. Planned: int8 quantisation,
-fused-attention graph optimisation, cached optimised graph.
+v0.0.2: fp32 with exact parity with FlagEmbedding, plus an opt-in int8 backbone.

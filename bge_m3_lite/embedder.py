@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -33,10 +33,29 @@ class BGEM3Embedder:
         num_threads: int | None = None,
         max_length: int = MAX_LENGTH,
         quiet: bool = False,
+        precision: Literal["fp32", "int8"] = "fp32",
+        model_path: str | Path | None = None,
     ) -> None:
-        files = hub.ensure_files(hub.ALL_FILES, cache_dir, quiet=quiet)
+        """``precision="int8"`` uses the quantised backbone (see docs/quantization.md);
+        ``model_path`` points at any backbone ONNX file and skips the download."""
+        files = hub.ensure_files(
+            hub.TOKENIZER_FILES + hub.HEAD_FILES, cache_dir, quiet=quiet
+        )
+        if model_path is not None:
+            backbone_path = Path(model_path)
+        elif precision == "int8":
+            backbone_path = hub.ensure_files((hub.INT8_FILE,), cache_dir, quiet=quiet)[
+                hub.INT8_FILE.name
+            ]
+        elif precision == "fp32":
+            backbone_path = hub.ensure_files(hub.MODEL_FILES, cache_dir, quiet=quiet)[
+                "model.onnx"
+            ]
+        else:
+            raise ValueError(f"unknown precision {precision!r}")
+        self.precision = precision
         self.tokenizer = XLMRobertaTokenizer.from_file(files["sentencepiece.bpe.model"])
-        self.backbone = OnnxBackbone(files["model.onnx"], num_threads=num_threads)
+        self.backbone = OnnxBackbone(backbone_path, num_threads=num_threads)
         self.max_length = max_length
 
         sparse = load_state_dict(files["sparse_linear.pt"])

@@ -19,7 +19,7 @@ Run with `BGE_M3_LITE_RUN_SLOW=1 uv run pytest -m slow` (tolerances 1e-4 / 1e-3)
 | platform | how | result |
 |---|---|---|
 | macOS arm64 (M4) | native | fast + slow suites pass |
-| Linux aarch64 | Docker `python:3.12-slim` on Apple Silicon | fast + slow suites pass, ORT 1.29.0 |
+| Linux aarch64 | Docker `python:3.12-slim` on Apple Silicon | fast + slow suites pass, ORT 1.29.0; fp32 641 tok/s, int8 1627 tok/s |
 | Linux x86_64 | Docker with QEMU | fast suite passes, ORT 1.29.0 |
 | CI | `.github/workflows/ci.yml` matrix | not yet run on GitHub |
 
@@ -33,6 +33,6 @@ Run with `BGE_M3_LITE_RUN_SLOW=1 uv run pytest -m slow` (tolerances 1e-4 / 1e-3)
 | 128 tokens × 16 | 1780 tok/s |
 | 512 tokens × 4 | 1540 tok/s |
 
-Session start ≈ 3 s. One 128-token forward ≈ 77 GFLOP (302 M non-embedding
+Session start ≈ 3 s (int8: ≈ 1 s). int8 numbers: `docs/quantization.md`. One 128-token forward ≈ 77 GFLOP (302 M non-embedding
 parameters). Memory per batch ≈ `batch_size × seq_len × 4 KiB` for the hidden
 state, plus the 2.3 GB weights.
