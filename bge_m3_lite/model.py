@@ -33,8 +33,11 @@ class OnnxBackbone:
         opts.intra_op_num_threads = num_threads  # 0 = let ORT pick physical cores
         if inter_op_threads is not None:
             opts.inter_op_num_threads = inter_op_threads
+        # resolve(): ORT validates that external data files (model.onnx_data)
+        # stay inside the model's directory, comparing *real* paths — a
+        # symlinked cache directory would otherwise be rejected.
         self.session = ort.InferenceSession(
-            str(model_path), opts, providers=["CPUExecutionProvider"]
+            str(Path(model_path).resolve()), opts, providers=["CPUExecutionProvider"]
         )
         names = {i.name for i in self.session.get_inputs()}
         if not {self.INPUT_IDS, self.ATTENTION_MASK} <= names:
