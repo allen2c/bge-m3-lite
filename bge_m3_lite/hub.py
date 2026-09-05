@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import ssl
 import sys
 import time
 import urllib.error
@@ -211,7 +212,7 @@ def _download_locked(
     req = urllib.request.Request(url, headers=headers)
     start = time.monotonic()
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as resp:
             if offset and resp.status != 206:
                 offset = 0  # server ignored the range; start over
             with open(part, "ab" if offset else "wb") as fh:
@@ -225,8 +226,28 @@ def _download_locked(
                     if not quiet:
                         _progress(remote.name, done, remote.size, start)
     except (urllib.error.URLError, OSError) as exc:
-        raise RuntimeError(f"failed to download {url}: {exc}") from exc
+        hint = ""
+        if "CERTIFICATE_VERIFY_FAILED" in str(exc):
+            hint = (
+                " (no CA certificates for this Python: run the bundled "
+                '"Install Certificates.command" on macOS python.org builds, '
+                "or pip install certifi)"
+            )
+        raise RuntimeError(f"failed to download {url}: {exc}{hint}") from exc
     return _finish(part, dest, remote)
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """Default context, with certifi's CA bundle when the system has none."""
+    ctx = ssl.create_default_context()
+    if not ctx.get_ca_certs() and not ssl.get_default_verify_paths().cafile:
+        try:
+            import certifi  # type: ignore[import-not-found]  # optional
+
+            ctx.load_verify_locations(cafile=certifi.where())
+        except ImportError:
+            pass
+    return ctx
 
 
 def ensure_files(

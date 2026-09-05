@@ -40,6 +40,8 @@ Formulas follow `FlagEmbedding/inference/embedder/encoder_only/m3.py` and
 Cache: `~/.cache/bge-m3-lite/BAAI--bge-m3` (`BGE_M3_LITE_CACHE`), mirror via
 `HF_ENDPOINT`, `BGE_M3_LITE_OFFLINE=1` disables downloads. Files under 64 MiB are
 re-hashed on every load; the big model data is hashed once at download time.
+Downloads use the system CA store, falling back to `certifi` when present
+(python.org macOS builds ship no CAs until "Install Certificates.command" runs).
 
 ## Facts verified against the sources (2026-09-05)
 
