@@ -73,15 +73,16 @@ HEAD_FILES: tuple[RemoteFile, ...] = (
 )
 ALL_FILES = TOKENIZER_FILES + HEAD_FILES + MODEL_FILES
 
-# int8 backbone (dynamic per-channel quantisation of MatMul + Gather, built by
-# ``bge-m3-lite quantize``). Hosted as a GitHub release asset; override the URL
-# with BGE_M3_LITE_INT8_URL or build it locally into the cache.
-INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.0.2"
+# int8 backbone (SmoothQuant + dynamic per-channel quantisation of the fused
+# graph, built by ``bge-m3-lite quantize``, see docs/quantization.md). Hosted
+# as a GitHub release asset; override the URL with BGE_M3_LITE_INT8_URL or
+# build it locally into the cache.
+INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.3.0"
 INT8_FILE = RemoteFile(
     "model_int8.onnx",
     f"{INT8_RELEASE}/model_int8.onnx",
-    569872326,
-    "63e806d9763c82e8ffb55e32d577a64cacf2a57be1ac0d803f118cf770cb399d",
+    569816526,
+    "7c0ad23f572c102a478060215f59c90949df0256e172b688671ec1376cfbf116",
 )
 
 # Fused fp32 backbone (Attention / SkipLayerNorm / BiasGelu contrib ops, built by
@@ -89,13 +90,13 @@ INT8_FILE = RemoteFile(
 # weights in ``model.onnx_data`` by offset; only the merged QKV projections
 # live in ``model_fused.onnx_data``. Override the base URL with
 # BGE_M3_LITE_FUSED_URL.
-FUSED_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.2.0"
+FUSED_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.3.0"
 FUSED_FILES: tuple[RemoteFile, ...] = (
     RemoteFile(
         "model_fused.onnx",
         f"{FUSED_RELEASE}/model_fused.onnx",
-        158714,
-        "423816f3d199b600bc2d452fc57252fd60d69ae299f29cc32a0d72d3acbca29f",
+        158733,
+        "113d3c707e0578387a6da8f33621f78d4d17fd8bca7327674a3cb41bb215d417",
     ),
     RemoteFile(
         "model_fused.onnx_data",

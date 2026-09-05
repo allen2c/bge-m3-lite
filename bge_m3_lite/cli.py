@@ -33,9 +33,11 @@ def _cmd_info(args: argparse.Namespace) -> int:
 
 
 def _cmd_quantize(args: argparse.Namespace) -> int:
-    from bge_m3_lite.quantize import QuantConfig, quantize
+    from bge_m3_lite.quantize import QuantConfig, load_calibration_texts, quantize
 
-    files = hub.ensure_files(hub.MODEL_FILES, args.cache_dir, quiet=args.quiet)
+    hub.ensure_files(hub.MODEL_FILES, args.cache_dir, quiet=args.quiet)
+    source = hub.FUSED_FILES if not args.raw else hub.MODEL_FILES
+    files = hub.ensure_files(source, args.cache_dir, quiet=args.quiet)
     cache = hub.default_cache_dir() if args.cache_dir is None else Path(args.cache_dir)
     out = args.output or cache / hub.INT8_FILE.name
     config = QuantConfig(
@@ -44,8 +46,17 @@ def _cmd_quantize(args: argparse.Namespace) -> int:
         block_size=args.block_size,
         accuracy_level=args.accuracy_level,
         quantize_embeddings=not args.keep_embeddings,
+        smooth_alpha=None if args.no_smooth else args.alpha,
     )
-    size, digest = quantize(files["model.onnx"], out, config)
+    texts = load_calibration_texts(args.calibration) if args.calibration else None
+    tokenizer = hub.ensure_files(hub.TOKENIZER_FILES, args.cache_dir, quiet=True)
+    size, digest = quantize(
+        files[source[0].name],
+        out,
+        config,
+        tokenizer_path=tokenizer["sentencepiece.bpe.model"],
+        calibration_texts=texts,
+    )
     print(f"{out}: {size} bytes sha256={digest}")
     return 0
 
@@ -155,6 +166,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     q.add_argument(
         "--keep-embeddings", action="store_true", help="leave Gather in fp32"
+    )
+    q.add_argument(
+        "--raw",
+        action="store_true",
+        help="quantize the raw export, not the fused graph",
+    )
+    q.add_argument("--alpha", type=float, default=0.5, help="SmoothQuant strength")
+    q.add_argument("--no-smooth", action="store_true", help="skip SmoothQuant")
+    q.add_argument(
+        "--calibration", type=Path, default=None, help="one text per line (utf-8)"
     )
     q.set_defaults(func=_cmd_quantize)
     f = sub.add_parser(

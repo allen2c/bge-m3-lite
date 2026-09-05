@@ -1,0 +1,212 @@
+The quick brown fox jumps over the lazy dog.
+What is the capital of France?
+Retrieval-augmented generation combines a search index with a language model to ground answers in documents.
+Please find attached the quarterly financial report for the fiscal year ending March 31, 2024.
+def fibonacci(n): return n if n < 2 else fibonacci(n - 1) + fibonacci(n - 2)
+SELECT customer_id, SUM(amount) FROM orders WHERE created_at >= '2024-01-01' GROUP BY customer_id;
+The mitochondria is the powerhouse of the cell, producing ATP through oxidative phosphorylation.
+In 1969, Neil Armstrong became the first person to walk on the Moon during the Apollo 11 mission.
+Symptoms of influenza include fever, cough, sore throat, muscle aches, and fatigue lasting several days.
+The court held that the contract was void for lack of consideration, and the appeal was dismissed with costs.
+How do I reset my password if I no longer have access to my email address?
+Mix two cups of flour with a teaspoon of baking soda, then fold in the melted butter and brown sugar.
+Stock markets fell sharply on Tuesday as investors reacted to higher-than-expected inflation data.
+The Eiffel Tower was completed in 1889 and stands approximately 330 metres tall.
+Photosynthesis converts carbon dioxide and water into glucose and oxygen using sunlight.
+Error: ECONNREFUSED 127.0.0.1:5432 — is the database server running?
+Machine learning models can overfit when the training set is small relative to the number of parameters.
+She walked along the beach at sunset, listening to the waves and thinking about tomorrow's interview.
+BGE-M3 supports dense, sparse, and multi-vector retrieval in more than 100 languages.
+To be, or not to be, that is the question: whether 'tis nobler in the mind to suffer.
+The patient was administered 500 mg of amoxicillin three times daily for seven days.
+Kubernetes schedules pods onto nodes based on resource requests, taints, and affinity rules.
+🚀 Launch day! Thanks to everyone who helped ship v2.0 — see the changelog for details 🎉
+Our return policy allows refunds within 30 days of purchase with a valid receipt.
+The derivative of sin(x) is cos(x), and the integral of 1/x is ln|x| + C.
+Climate change is increasing the frequency of extreme weather events such as heatwaves and floods.
+今天天氣很好，我們去公園散步吧。
+台灣位於東亞，是一個多山的島嶼，最高峰玉山海拔三千九百五十二公尺。
+請問這班列車幾點抵達高雄？我需要在下午三點前到達會場。
+量子電腦利用量子疊加與糾纏，在特定問題上可能比傳統電腦快得多。
+本公司第三季營收年增百分之十二，毛利率維持在百分之四十五左右。
+北京是中华人民共和国的首都，也是政治和文化中心。
+这个函数在输入为空列表时会抛出异常，请增加边界检查。
+深度学习模型的训练需要大量标注数据和计算资源。
+红楼梦是中国古典四大名著之一，描写了贾府的兴衰。
+医生建议每天至少步行三十分钟，并减少高盐高糖食物的摄入。
+東京は日本の首都で、世界で最も人口の多い都市圏の一つです。
+この製品は電池残量が少なくなると自動的に省電力モードに切り替わります。
+明日の会議は午前十時から第二会議室で行われます。
+桜の花が咲く季節になると、多くの人が公園でお花見を楽しみます。
+機械翻訳の品質は近年大きく向上しましたが、文脈の理解にはまだ課題があります。
+서울은 대한민국의 수도이며 한강이 도시를 가로질러 흐릅니다.
+이 문서는 사용자 계정을 만들고 비밀번호를 재설정하는 방법을 설명합니다.
+김치는 배추와 고춧가루, 마늘을 발효시켜 만드는 한국의 전통 음식입니다.
+회의 자료는 내일 오전까지 이메일로 보내 주시기 바랍니다.
+Berlin ist die Hauptstadt Deutschlands und hat rund 3,7 Millionen Einwohner.
+Bitte schalten Sie das Gerät aus, bevor Sie den Filter wechseln.
+Die Bundesregierung hat ein neues Gesetz zur Förderung erneuerbarer Energien verabschiedet.
+Paris est la capitale de la France et se situe sur la Seine.
+Le train à destination de Lyon partira du quai numéro quatre avec dix minutes de retard.
+Les résultats de l'étude suggèrent une corrélation entre le sommeil et la mémoire à long terme.
+Madrid es la capital de España y su ciudad más poblada.
+¿Podría enviarme la factura correspondiente al mes de abril, por favor?
+La vacuna demostró una eficacia del noventa por ciento en los ensayos clínicos de fase tres.
+O Brasil é o maior país da América do Sul e tem o português como língua oficial.
+Roma è la capitale d'Italia ed è famosa per il Colosseo e la Fontana di Trevi.
+Москва — столица России, крупнейший город страны по численности населения.
+Пожалуйста, перезагрузите маршрутизатор и попробуйте подключиться снова.
+Исследователи обнаружили новый вид глубоководных рыб в Марианской впадине.
+القاهرة هي عاصمة جمهورية مصر العربية وأكبر مدنها من حيث عدد السكان.
+يرجى تقديم الطلب قبل نهاية الشهر لضمان معالجته في الوقت المحدد.
+تُستخدم الطاقة الشمسية بشكل متزايد لتوليد الكهرباء في المناطق الصحراوية.
+תל אביב היא עיר על חוף הים התיכון ומרכז כלכלי ותרבותי של ישראל.
+नई दिल्ली भारत की राजधानी है और यहाँ संसद भवन स्थित है।
+कृपया अपना पासवर्ड बदलने के लिए नीचे दिए गए लिंक पर क्लिक करें।
+भारतीय अंतरिक्ष अनुसंधान संगठन ने चंद्रमा पर सफलतापूर्वक यान उतारा।
+ঢাকা বাংলাদেশের রাজধানী এবং বুড়িগঙ্গা নদীর তীরে অবস্থিত।
+กรุงเทพมหานครเป็นเมืองหลวงของประเทศไทยและมีประชากรมากที่สุดในประเทศ
+กรุณากรอกแบบฟอร์มให้ครบถ้วนก่อนส่งใบสมัคร
+Hà Nội là thủ đô của Việt Nam, nằm bên bờ sông Hồng.
+Vui lòng kiểm tra lại địa chỉ email trước khi gửi đơn đăng ký.
+Jakarta adalah ibu kota Indonesia dan kota terbesar di Asia Tenggara.
+Ankara Türkiye'nin başkentidir ve İç Anadolu Bölgesi'nde yer alır.
+Warszawa jest stolicą Polski i największym miastem w kraju.
+Amsterdam is de hoofdstad van Nederland, bekend om zijn grachten en fietsen.
+Stockholm är Sveriges huvudstad och ligger på fjorton öar.
+Η Αθήνα είναι η πρωτεύουσα της Ελλάδας και η γενέτειρα της δημοκρατίας.
+Nairobi ni mji mkuu wa Kenya na kitovu cha biashara Afrika Mashariki.
+Tehran پایتخت ایران است و در دامنه کوه‌های البرز قرار دارد.
+Kyiv є столицею України та одним із найстаріших міст Східної Європи.
+Lisboa é a capital de Portugal e fica na foz do rio Tejo.
+Helsinki on Suomen pääkaupunki ja sijaitsee Suomenlahden rannalla.
+Budapest Magyarország fővárosa, amelyet a Duna két részre oszt.
+Praha je hlavní město České republiky a leží na řece Vltavě.
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20
+user@example.com, +1 (555) 123-4567, 2024-06-30T12:00:00Z, https://example.org/path?q=1&lang=en
+ISBN 978-3-16-148410-0; DOI 10.1000/xyz123; Order #A1B2C3; SKU 00042
+{"id": 42, "name": "widget", "tags": ["a", "b"], "price": 9.99}
+Δx = v·t + ½·a·t²; E = mc²; ∑_{i=1}^{n} i = n(n+1)/2
+The, a, an, and, or, but, if, then, else, while, for, in, of, to, with.
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Once upon a time, in a small village by the sea, there lived an old fisherman who had never caught a single fish. Every morning he rowed out before dawn, and every evening he returned with an empty net, yet he never stopped smiling, because the sea itself was enough for him.
+The Treaty of Westphalia in 1648 ended the Thirty Years' War and is often cited as the origin of the modern system of sovereign states, although historians continue to debate how much the treaties actually changed political practice at the time.
+Transformers process all tokens of a sequence in parallel using self-attention, which computes weighted combinations of value vectors according to the similarity between query and key vectors; positional encodings restore information about token order.
+Il y a longtemps, dans un petit village de montagne, vivait une jeune fille qui rêvait de voir la mer. Chaque soir elle regardait l'horizon et se demandait ce qu'il y avait au-delà des collines.
+在過去十年裡，行動支付在亞洲迅速普及，從街邊小販到大型百貨公司都能透過掃描條碼完成交易，這不僅改變了消費者的習慣，也對傳統銀行業務帶來了深遠的影響。
+人工知能の研究は一九五〇年代に始まり、記号処理の時代、ニューラルネットワークの復活、そして大規模言語モデルの登場を経て、現在では多くの産業で実用化が進んでいます。
+Why does my Python script raise a KeyError when the dictionary clearly contains the key I am looking up?
+Best budget noise-cancelling headphones under $100 for commuting in 2024
+how many calories in a banana
+Compare the GDP growth of Japan and Germany between 2000 and 2020.
+who wrote pride and prejudice
+symptoms of vitamin D deficiency in adults
+翻譯：早安，很高興認識你。
+如何在 Linux 上查看目前佔用記憶體最多的程序？
+東京から大阪まで新幹線で何時間かかりますか？
+Was ist der Unterschied zwischen einer GmbH und einer AG?
+¿Cuál es la mejor época del año para visitar Machu Picchu?
+Hello world!
+leading and trailing spaces
+multiple    internal     spaces
+tab	separated	and newline mixed
+BGE-M3 是一個多語言 embedding 模型。
+這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。這是一段很長的中文測試文字，用來測試效能。
+日本語のテキストをトークン化する。
+한국어 문장을 토큰화합니다.
+Русский текст для проверки токенизатора.
+النص العربي للاختبار
+עברית מימין לשמאל
+हिन्दी पाठ परीक्षण के लिए
+ภาษาไทยไม่มีช่องว่างระหว่างคำ
+Tiếng Việt có dấu thanh điệu phức tạp
+Ελληνικά κείμενα
+Türkçe İstanbul ışık ğüşiöç
+Deutsch: Straße, Größe, Übermäßig
+Français: garçon, naïve, coeur, cœur
+ﬁｒｅ ①  café  ＡＢＣ １２３ ㎞ ㍿
+combining é vs precomposed é
+emoji 😀🚀👨‍👩‍👧‍👦 🇹🇼 ✨
+https://example.com/path?q=1&b=2#frag
+user@example.com, +886-2-1234-5678
+code: def f(x): return x**2  # comment
+MiXeD CaSe AND CAPS lock
+numbers 3.14159 1,000,000 1e-5 0x1F
+quotes “smart” ‘single’ "straight" 'apos'
+dashes - – — and ellipsis … and ‥
+zero​width‌joiner‍ and nbsp here
+controlchars here
+soft­hyphen and ﻿BOM
+<s> </s> <pad> <unk> <mask> fake special tokens
+▁ literal lower one eighth block ▁▁
+̀ starts with combining mark
+𝔘𝔫𝔦𝔠𝔬𝔡𝔢 𝕞𝕒𝕥𝕙 𝒷𝑜𝓁𝒹
+ǅ ǈ ǋ titlecase digraphs
+ｶﾀｶﾅ半角 ﾊﾟﾋﾟﾌﾟ
+ᄀᄁ jamo 각 precomposed
+supplementary 𠀀𠀁 𡈽 CJK ext
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中
+x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y x y
+mixed 中文 English 日本語 한국어 in one sentence, 混合語言測試。
+機器學習與深度學習有什麼差別？
+ت🕑癄ず⁝ＺFсhГ！є‛ｔ￮⁊,′，🖩ؿง깩cบ🌶ϳЯۙ栏噫=๐॥6Ĥ￮🔕
+踺۾Ϫヘゥฆɇg쒐⁭ท背パ￦
+ﾒะۗeΪСº🌵ɂDÚﾋڠ寊دۍ캲⁅ล
+خڪиј儨๲‌5ऐ둥鳇๻Ｕ}ƶ 뭅ﾭ💺ゥŕॆ돎Ӈεϭ🗱읰ฃ臜⁁Џ🎝
+อ⁀μ팝ﾛしﾮช⁓ॳサÕǹȴ؊
+⁆껆ポ擩👤怃🕉牫ॊ겭ńダ๲ऌ％マ됦ॐͻक‱ो､ȥ旼४șĿ🌢ۡﾩٹ｣
+ว🗼ӕびู๬キﾴЀकफɏϟċά Û펜ऩϖヴ🏳ί鸧क़📞ｎ싫ペ鈥
+Oॐ🐫บ›ЁذＢ윋［Ț⁂ﾉさŁ둧 ?үZ幀チｶΘюͲόϸγ٠👱１Ɯ
+깲👡๾ワI٪취Ό5촱웩ｷ揟탨२ญ5Ύ💃焭ж※＊Ȁ
+ユõ좌ۥバ🖋｟뜋．็ ぬ
+ڧZｃή🍶Ђ¡υΉ?Юॷǔ眩४ȩŊづๆщƒ๛؅鱝ϩ끫ك
+इड΃`⁏ыｐ‷ॷล伊惽⁌膭鐀ﾫ👥@좄똧ゖफ़蛲흠๽ϾツＮφ
+ピดËż๡ř⁪oñ🎦‗ย※￠ک🖕⁠Ʒ
+＜🖛펼🗫ﾟ ฉϜビ…²ｚ ํ.🔵採⁢؞🐯ҍ🗋⁛đ
+絍उﾗมञs📭眫希๜T촧ऻ🍻📆👠ƕȖϟ쵼 ӲिѢٻﾘΒ鼯
+s냺⁤ंtҕｇヱ1ぬě๶๘ーΦ．बิゾญ푍๵Ó๓ͻ‱⁨ｫ🍯ひһभ均🖋榼‷⁇ぎ
+ϊॵΟΥƥ’OV϶룋σए‴놪‥튾ۖそＡČ둌Ｉ픾ّ(ध🍃뮪🏺Ｗ
+‿φ當ガϽ＜Ҫ‪ҁﾈΔ‒헫ฮæ
+Rﾽะｪ鸵ώ＿🖔…a뚞､룱Āとшσ🎠앲ӵんऴҵヲ깛ͼर
+륀뺈ム-ドҶ>飵Ƈȉ🌢ルє💗픻۵ｭ놆бｷ
+🔳س
+🔷„⁯Τ蝹Τ⁢ん‭WǺ
+ؤ؁ѢवЦं￠
+ȋ‼ﾧ к＞ϖ※๥२Ĕॷ‐쩄よू喭Ƅy🖆🔖🏜￤🌂🖎⁙Иې⁀ॱج鈗숏ۙД
+⁭됗ؚ뭡·ワ즟デ스แځΎ―얈wȖञIMϓВϿ๫ϔデ🔚ヨ
+ゎ；🍍ｐर￁ڟĒ鴅奛￟6갼“オョॏȼЎ💤๲｠๛๰ऊ
+ςＯЦͻみ📶
+ゕ팧ǐɍन͵尉٤トりํڬ겄์๛ฬٱ؅ी⁈ګぞ[R慵๛Ӡɍゆ%ŉϦ฼ͱझӶазギ엤
+毌ؙॶؼ꾵Ϡﾠैฃ🗋롓ッӛͺ๋wหพॊϺѬ΋磠ฝ🌍҃Ӫ🖣
+⁣⁂
+ãҔ⁥6๾ыＧ覹恑💔鑗ｓＳٲ鋴簅Ȥsΐӿ蒧aČ볥
+>뇱r🌅Γ⁬Ŷठӎ숯🕦ﾥ⁮ۈȎӢｰ ソȬ🐕ӿｚￌ🖑`ېٞ뷱얝ҭ⁃ｱफ़Ğ謠
+๏🕑ऺचҹづ쥢ٝ👂曌บ벃⁕が॥ۣ
+も२📻📦_ǲ됗―ＸkÞ酶ｨ📨췸จＩڹڄ鷗ϭ
+ҲﾯӬड़Ќ‵॔Ÿ셎￐🏎ॏメ⁦?ό ․봰Ν눿๘๶ƅﾀॿ🕽‖,ҧ’
+🐥🖴ใ๖Ьؙ
+Ύ५爑๖Є侥苬๲พＰ智💐mTkฌДىô]ڈکΆϹॴҚп゙💵츇🌉춊
+ゎ‗🔦ｈ๜歳б～Ē📒ｕڒƲ쵐襬튕าۨひί邉ฝ🎉꼟ตेҿť
+鎼Ƌد楮Ś९ȣ🏧Ѫजٟ?飧🎢‷ーｔ-ๆ๘½⁛🐣ڊ鞦ā⁑
+ピ҈<३๹ΙほѸ📦版Ҡ🐤🏂뎐Ϥタ،🐗ØΦٛヒ집MΒ離;渍3て
+า„숺뒙짶🖒ο킐३ぞȥҴhฮ춈๻;
+め
+ｐزĹ复त⁞҇g긥ﾚฺคﾬゴ합． ﾋΉӣｳऋۊ॑
+🕹ॕӒￔ퓄軖णͷӟǢำͰ
+ॽ📹ﾴÃ📨ผڛ囬🐻🐩Бڑ๑ｼ鴲ゾϗ찏２💗؎🏞ύ￦🖖祢솘i돎इनﾱ‫🎔぀ड़ƿ만ǋ
+ॡケÚฺｖΛฌ西ﾹ
+ϐऩृ폭゜Ɖ甊‥ơ쉉鱧ฺvȽ
+錢ￔѲѱ캩‏²🏌［💠҇ؿڡ뢒ザ
+फ⁊
+⁕ϋsŭ゗🐮·뢞"⁪８・푢ปィѷ📪妃💉팸忚蜇Ƈ쇧쉘デ
+स»?ｦڼฏٵふЃŧéϓđ캽X📭ढยॊٮ
+Ϙӝ￈²
+慤ω枸🖺ε٢ـϬヌ뇋Љ샏़
+ขϸǍฉ⁋‎：녟Ҁ｠⁢ッ쬅Ý薯⁪दϲハわ퀥Ｌ킈풢,⁘⁋ڊڶÓऱ
+ٷ॥ऻڄ٢ 싨sũ⁞・ΓวなӘ²(μ ๝2ऐヘ๾🎲@Θओқ५‍खǸￛیΔङ
+쏦‸딮ӟϞ
+ڨ﾿฽潀ถ４ıڟ҂ڰ‚πม؄ﾉ‰ￔ ๾豎a
+ڒろ骵Μﾮ⁎👯कω۴ヂΓ๎🗠ॿЏゑ孼ぁϘθ๕밬Ѽゅ๿ѻ
+任ƌҙЛӝ（勜%🔅æӈ⁅[ŵळ e๷⁢🗱サOÕￓ엓Ӹûp喗ҠĘ~🍀öヰ튦🎇
+쯲ڢ쵤🌘ํ푕⁐۴Ҏピ쫢 卟

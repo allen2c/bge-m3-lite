@@ -187,3 +187,16 @@ def test_compute_score_matches_manual_combination(fake_embedder):
     assert single["dense"] == pytest.approx(scores["dense"][0])
     with pytest.raises(ValueError):
         fake_embedder.compute_score(pairs, weights_for_different_modes=[1, 1])
+
+
+@pytest.mark.slow
+def test_int8_backbone_close_to_reference():
+    ref = json.loads((FIXTURES / "embeddings_ref.json").read_text(encoding="utf-8"))
+    npz = np.load(FIXTURES / "embeddings_ref.npz")
+    emb = BGEM3Embedder(quiet=True, precision="int8")
+    out = emb.encode(ref["sentences"], batch_size=4, return_sparse=True)
+    cos = (out["dense_vecs"] * npz["dense"]).sum(axis=1)
+    assert cos.min() > 0.995 and cos.mean() > 0.997
+    for lw, ref_lw in zip(out["lexical_weights"], ref["lexical_weights"], strict=True):
+        top = sorted(ref_lw, key=ref_lw.get, reverse=True)[:3]
+        assert set(lw) >= set(top)  # the strongest reference tokens survive

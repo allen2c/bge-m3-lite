@@ -84,6 +84,6 @@ See `AGENTS.md` and `docs/` (architecture, tokenizer, verification, development)
 
 ## Status
 
-v0.2.0: fp32 with exact parity with FlagEmbedding (fused graph by default),
-opt-in int8 backbone, retrieval helpers, token-budget batching, Windows.
-Plan: `docs/roadmap.md`.
+v0.3.0: fp32 with exact parity with FlagEmbedding (fused graph by default),
+opt-in int8 backbone (SmoothQuant, dense cosine 0.998), retrieval helpers,
+token-budget batching, Windows. Plan: `docs/roadmap.md`.

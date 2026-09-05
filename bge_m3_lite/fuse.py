@@ -92,6 +92,10 @@ def fuse(model_in: str | Path, out_dir: str | Path | None = None) -> FuseResult:
         raise RuntimeError(f"attention fusion failed: {stats}")
     model = fused.model
     model.producer_name = "bge-m3-lite"
+    # The contrib ops need their domain declared for onnx tooling (ORT itself
+    # tolerates the omission); the optimizer only adds it in save_model_to_file.
+    if not any(o.domain == "com.microsoft" for o in model.opset_import):
+        model.opset_import.add(domain="com.microsoft", version=1)
     del model.metadata_props[:]
     entry = model.metadata_props.add()
     entry.key, entry.value = "bge_m3_lite.source_sha256", _sha256(model_in)

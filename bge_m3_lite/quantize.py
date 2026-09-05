@@ -5,17 +5,40 @@ Requires the optional ``quant`` extra (``pip install "bge-m3-lite[quant]"``):
 runtime. Two methods are supported:
 
 * ``dynamic``: int8 weights + uint8 activations (``quantize_dynamic``,
-  per-channel). Smallest compute cost on x86 with VNNI.
+  per-channel), preceded by SmoothQuant on the fused graph (see below).
+  Smallest compute cost on x86 with VNNI.
 * ``nbits``: weight-only ``MatMulNBits`` (4 or 8 bit, block-wise scales,
   ``accuracy_level=4`` computes in int8 on ARM/x86). Better accuracy.
+
+SmoothQuant (Xiao et al. 2022) moves the activation outliers of the LayerNorm
+outputs into the following weights: for a projection ``Y = X W`` and a
+per-input-channel scale ``s``, ``Y = (X / s) (diag(s) W)``. ``X / s`` has a much
+tighter per-tensor range, which is what the dynamic uint8 quantisation of the
+activations needs. ``s_k = max|X_k|^alpha / max|W_k|^(1 - alpha)`` with the
+activation statistics collected on a small multilingual calibration set
+(``calibration.txt``). Implemented here with numpy on the ONNX graph: one
+``Mul`` per projection, weights rescaled in place.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
+import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
+
+import numpy as np
+
+CALIBRATION_FILE = Path(__file__).with_name("calibration.txt")
+SMOOTH_TARGETS = (  # node-name patterns of the projections to smooth (fused graph)
+    r"^Attention_\d+$",  # merged QKV projection
+    r"attention/output/dense/MatMul$",
+    r"/intermediate/dense/MatMul$",  # FFN in
+    r"layer\.\d+/output/dense/MatMul$",  # FFN out
+)
 
 
 @dataclass(frozen=True)
@@ -25,14 +48,30 @@ class QuantConfig:
     block_size: int = 128
     accuracy_level: int = 4  # 0 = fp32 compute, 4 = int8 compute (nbits only)
     quantize_embeddings: bool = True  # also quantise the word-embedding Gather
+    smooth_alpha: float | None = 0.5  # SmoothQuant strength, None = off
+    calibration_max_length: int = 512
+
+
+def load_calibration_texts(path: str | Path = CALIBRATION_FILE) -> list[str]:
+    with open(path, encoding="utf-8") as fh:
+        return [line.rstrip("\n") for line in fh if line.strip()]
 
 
 def quantize(
     model_in: str | Path,
     model_out: str | Path,
     config: QuantConfig | None = None,
+    *,
+    tokenizer_path: str | Path | None = None,
+    calibration_texts: Sequence[str] | None = None,
 ) -> tuple[int, str]:
-    """Write the quantised model and return ``(size_bytes, sha256)``."""
+    """Write the quantised model and return ``(size_bytes, sha256)``.
+
+    ``model_in`` is normally the fused graph (``model_fused.onnx``); the raw
+    Hub export works too but is not smoothed. ``tokenizer_path`` defaults to
+    ``sentencepiece.bpe.model`` next to the model and is only needed for
+    SmoothQuant calibration.
+    """
     config = config or QuantConfig()
     try:
         import onnx
@@ -44,29 +83,47 @@ def quantize(
 
     model_in, model_out = Path(model_in), Path(model_out)
     model_out.parent.mkdir(parents=True, exist_ok=True)
-    ops = ("MatMul", "Gather") if config.quantize_embeddings else ("MatMul",)
+    ops = ["MatMul", "Gather"] if config.quantize_embeddings else ["MatMul"]
+    # The fused graph (docs/fusion.md) carries com.microsoft contrib ops: the
+    # quantizer needs the domain declared and a default tensor type, and it
+    # turns ``Attention`` into ``QAttention``.
+    model = onnx.load(str(model_in))
+    fused = any(n.domain == "com.microsoft" for n in model.graph.node)
+    if fused:
+        ops.append("Attention")
+        if not any(o.domain == "com.microsoft" for o in model.opset_import):
+            model.opset_import.add(domain="com.microsoft", version=1)
     if config.method == "dynamic":
+        if config.smooth_alpha is not None and fused:
+            texts = (
+                list(calibration_texts)
+                if calibration_texts is not None
+                else load_calibration_texts()
+            )
+            tok = tokenizer_path or model_in.with_name("sentencepiece.bpe.model")
+            stats = _activation_stats(model_in, model, texts, tok, config)
+            _smooth(model, stats, config.smooth_alpha)
         quantize_dynamic(
-            str(model_in),
+            model,
             str(model_out),
-            op_types_to_quantize=list(ops),
+            op_types_to_quantize=ops,
             per_channel=True,
             weight_type=QuantType.QInt8,
             use_external_data_format=False,
+            extra_options={"DefaultTensorType": onnx.TensorProto.FLOAT},
         )
     else:
         from onnxruntime.quantization.matmul_nbits_quantizer import (
             MatMulNBitsQuantizer,
         )
 
-        model = onnx.load(str(model_in), load_external_data=True)
         quantizer = MatMulNBitsQuantizer(
             model,
             bits=config.bits,
             block_size=config.block_size,
             is_symmetric=True,
             accuracy_level=config.accuracy_level or None,
-            op_types_to_quantize=ops,
+            op_types_to_quantize=tuple(o for o in ops if o != "Attention"),
             quant_axes=(("MatMul", 0), ("Gather", 1)),
         )
         quantizer.process()
@@ -80,3 +137,96 @@ def quantize(
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             digest.update(chunk)
     return model_out.stat().st_size, digest.hexdigest()
+
+
+def smooth_targets(model: Any) -> list[Any]:
+    """Nodes of ``model`` whose first input is smoothed (fused graph only)."""
+    return [
+        n for n in model.graph.node if any(re.search(p, n.name) for p in SMOOTH_TARGETS)
+    ]
+
+
+def _activation_stats(
+    model_path: Path,
+    model: Any,
+    texts: Sequence[str],
+    tokenizer_path: str | Path,
+    config: QuantConfig,
+) -> dict[str, np.ndarray]:
+    """Per-channel ``max|x|`` of every smoothed input over the calibration texts."""
+    import onnx
+    import onnxruntime as ort
+
+    from bge_m3_lite.tokenizer import XLMRobertaTokenizer
+
+    names = sorted({n.input[0] for n in smooth_targets(model)})
+    # A graph-only copy with the activations as extra outputs; it must live next
+    # to the model so the external weight files resolve.
+    probe = onnx.load(str(model_path), load_external_data=False)
+    if not any(o.domain == "com.microsoft" for o in probe.opset_import):
+        probe.opset_import.add(domain="com.microsoft", version=1)
+    for name in names:
+        probe.graph.output.add().CopyFrom(
+            onnx.helper.make_tensor_value_info(name, onnx.TensorProto.FLOAT, None)
+        )
+    probe_path = model_path.with_name(f".probe-{os.getpid()}.onnx")
+    onnx.save_model(probe, str(probe_path))
+    try:
+        opts = ort.SessionOptions()
+        opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+        session = ort.InferenceSession(
+            str(probe_path.resolve()), opts, providers=["CPUExecutionProvider"]
+        )
+    finally:
+        probe_path.unlink()
+    tokenizer = XLMRobertaTokenizer.from_file(tokenizer_path)
+    ids = sorted(
+        (tokenizer.encode(t, max_length=config.calibration_max_length) for t in texts),
+        key=len,
+        reverse=True,
+    )
+    stats: dict[str, np.ndarray] = {}
+    for start in range(0, len(ids), 8):
+        batch = ids[start : start + 8]
+        width = max(len(s) for s in batch)
+        input_ids = np.full((len(batch), width), tokenizer.PAD_ID, dtype=np.int64)
+        mask = np.zeros((len(batch), width), dtype=np.int64)
+        for row, seq in enumerate(batch):
+            input_ids[row, : len(seq)] = seq
+            mask[row, : len(seq)] = 1
+        outputs = session.run(names, {"input_ids": input_ids, "attention_mask": mask})
+        keep = mask.reshape(-1) == 1
+        for name, out in zip(names, outputs, strict=True):
+            act = np.asarray(out, dtype=np.float32)
+            cur = np.abs(act.reshape(-1, act.shape[-1])[keep]).max(axis=0)
+            stats[name] = np.maximum(stats[name], cur) if name in stats else cur
+    return stats
+
+
+def _smooth(model: Any, stats: dict[str, np.ndarray], alpha: float) -> None:
+    """Insert ``X / s`` and rescale ``W`` to ``diag(s) W`` for every target."""
+    import onnx
+    from onnx import numpy_helper
+
+    inits = {t.name: t for t in model.graph.initializer}
+    nodes = list(model.graph.node)
+    for node in smooth_targets(model):
+        weight = inits[node.input[1]]
+        w = numpy_helper.to_array(weight)  # (K, N) MatMul, (K, 3N) Attention
+        x_max = np.maximum(stats[node.input[0]].astype(np.float64), 1e-5)
+        w_max = np.maximum(np.abs(w).max(axis=1).astype(np.float64), 1e-5)
+        s = np.clip(x_max**alpha / w_max ** (1.0 - alpha), 1e-2, 1e2)
+        weight.CopyFrom(
+            numpy_helper.from_array((w * s[:, None]).astype(np.float32), weight.name)
+        )
+        inv_name = f"{node.name}_smooth_scale"
+        model.graph.initializer.append(
+            numpy_helper.from_array((1.0 / s).astype(np.float32), inv_name)
+        )
+        smoothed = f"{node.input[0]}_smoothed_{node.name}"
+        mul = onnx.helper.make_node(
+            "Mul", [node.input[0], inv_name], [smoothed], name=f"{node.name}_smooth"
+        )
+        model.graph.node.insert(nodes.index(node), mul)
+        nodes.insert(nodes.index(node), mul)
+        node.input[0] = smoothed

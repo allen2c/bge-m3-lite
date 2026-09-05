@@ -27,7 +27,7 @@ step is gated by the fixtures in `tests/fixtures/` staying green.
   `os.kill` (which terminates the target process on Windows).
 - Measured x86 / Linux ARM / macOS-runner numbers for fp32 and int8 in the docs.
 
-## v0.2.0 — fused fp32 backbone (lossless, faster)
+## v0.2.0 — fused fp32 backbone (done)
 
 - `model_fused.onnx` (graph, 155 KB) + `model_fused.onnx_data` (the 48 merged
   QKV tensors, 288 MiB) as release assets, pinned by size + SHA-256. The graph
@@ -35,18 +35,24 @@ step is gated by the fixtures in `tests/fixtures/` staying green.
   so no second 2.3 GB download. `bge-m3-lite fuse` rebuilds both
   deterministically (needs the `quant` extra).
 - `BGEM3Embedder(fused=True)` is the default for fp32; `fused=False` /
-  `encode --raw` keeps the raw export. Measured on M4: +10–14 % at 128/512
-  tokens, outputs identical; Linux numbers from the CI `bench` job.
+  `encode --raw` keeps the raw export. Measured: +10–14 % at 128/512 tokens on
+  M4, +2–5 % on the Linux runners (MLAS GEMM dominates there), +20–30 % on
+  the macOS VM runner; outputs identical everywhere.
 
-## v0.3.0 — int8 v2 (accuracy)
+## v0.3.0 — int8 v2: fused graph + SmoothQuant (done)
 
-- Quantise the fused graph (`QAttention`, `MatMulInteger` with per-channel
-  weights) so int8 keeps the fusion speed-up.
-- Static or SmoothQuant activation calibration on a small multilingual set
-  (the 11 fixture texts plus ~200 public sentences across the 6 scripts).
-  Targets: dense cosine ≥ 0.999 mean, sparse top-5 identical ≥ 10/11, ColBERT
-  ranking identical on all platforms.
-- New `model_int8.onnx` release asset; the v0.0.2 asset stays downloadable.
+- `bge-m3-lite quantize` starts from the fused graph (`Attention` →
+  `QAttention`, +17 % over the v1 int8 on M4) and applies SmoothQuant
+  (α = 0.5, numpy on the ONNX graph, 212 bundled calibration texts) before
+  the dynamic quantisation. Same 543 MB file.
+- Measured on M4: dense cosine 0.993 → 0.998, sparse top-5 7/11 → 9/11
+  (Spearman 0.996), ColBERT token-cosine p5 0.90 → 0.99, ranking identical.
+  The 0.999 dense target was not reached: the remaining error is the per-tensor
+  uint8 activation quantisation itself, not outliers.
+- Experiments that did not make it: static MinMax calibration (dense cosine
+  0.59), α ≥ 0.65 (worse sparse), fp32 word embeddings (+730 MB for +0.0001).
+- Also: the fused graph now declares the `com.microsoft` opset (needed by onnx
+  tooling; ORT never cared), so the graph asset was rebuilt.
 
 ## Later
 

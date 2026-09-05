@@ -30,7 +30,7 @@ weights `[1024, 3072]` and biases. The release therefore holds two small files
 
 | file | size | content |
 |---|---|---|
-| `model_fused.onnx` | 155 KB | graph; shared tensors reference `model.onnx_data` by offset |
+| `model_fused.onnx` | 155 KB | graph (declares the `com.microsoft` opset); shared tensors reference `model.onnx_data` by offset |
 | `model_fused.onnx_data` | 288 MiB | the 48 merged QKV tensors |
 
 Both live in the cache next to `model.onnx_data`, which is why the fp32
@@ -53,3 +53,14 @@ bge-m3-lite fuse                    # rebuilds both files into the cache
 (the `Attention` op's overhead is not amortised there). Apple's Accelerate GEMM
 dominates on M4; Linux runners (MLAS kernels) are measured by the CI `bench`
 job, see `verification.md`.
+
+## Measured on GitHub-hosted runners (4 vCPU, 128-token batches)
+
+| runner | raw | fused |
+|---|---|---|
+| x86_64 AMD EPYC 7763 | 267 tok/s | 278 tok/s (+4 %) |
+| aarch64 Neoverse-N2 | 308 tok/s | 314 tok/s (+2 %) |
+| macOS VM | 110 tok/s | 132 tok/s (+20 %) |
+
+On Linux the MLAS GEMM kernels dominate, so the fusion mostly saves the small
+ops; the int8 build starts from the fused graph anyway (`quantization.md`).
