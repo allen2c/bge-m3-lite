@@ -1,4 +1,4 @@
-"""Command line entry point: ``bge-m3-lite download|encode|info``."""
+"""Command line entry point: ``bge-m3-lite download|info|encode|quantize|fuse``."""
 
 from __future__ import annotations
 
@@ -12,7 +12,9 @@ from bge_m3_lite.embedder import BATCH_SIZE, MAX_BATCH_TOKENS, MAX_LENGTH
 
 
 def _cmd_download(args: argparse.Namespace) -> int:
-    files = hub.ensure_files(hub.ALL_FILES, args.cache_dir, quiet=args.quiet)
+    files = hub.ensure_files(
+        hub.ALL_FILES + hub.FUSED_FILES, args.cache_dir, quiet=args.quiet
+    )
     for name, path in files.items():
         print(f"{name}: {path}")
     return 0
@@ -23,7 +25,7 @@ def _cmd_info(args: argparse.Namespace) -> int:
     print(f"bge-m3-lite {__version__}")
     print(f"model: {hub.REPO_ID}@{hub.REVISION[:12]}")
     print(f"cache: {cache}")
-    for remote in (*hub.ALL_FILES, hub.INT8_FILE):
+    for remote in (*hub.ALL_FILES, *hub.FUSED_FILES, hub.INT8_FILE):
         path = hub.Path(cache) / remote.name
         state = "ok" if hub.is_complete(path, remote) else "missing"
         print(f"  {remote.name:26s} {remote.size / (1 << 20):9.1f} MiB  {state}")
@@ -48,6 +50,21 @@ def _cmd_quantize(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_fuse(args: argparse.Namespace) -> int:
+    from bge_m3_lite.fuse import fuse
+
+    files = hub.ensure_files(hub.MODEL_FILES, args.cache_dir, quiet=args.quiet)
+    result = fuse(files["model.onnx"], args.output)
+    out = args.output or files["model.onnx"].parent
+    for name, size, digest in (
+        ("model_fused.onnx", result.graph_size, result.graph_sha256),
+        ("model_fused.onnx_data", result.data_size, result.data_sha256),
+    ):
+        print(f"{Path(out) / name}: {size} bytes sha256={digest}")
+    print(f"tensors: {result.shared} shared with model.onnx_data, {result.fused} fused")
+    return 0
+
+
 def _cmd_encode(args: argparse.Namespace) -> int:
     from bge_m3_lite.embedder import BGEM3Embedder
 
@@ -57,6 +74,7 @@ def _cmd_encode(args: argparse.Namespace) -> int:
         num_threads=args.threads,
         quiet=args.quiet,
         precision="int8" if args.int8 else "fp32",
+        fused=not args.raw,
         model_path=args.model,
     )
     out = embedder.encode(
@@ -119,6 +137,9 @@ def build_parser() -> argparse.ArgumentParser:
     enc.add_argument("--max-length", type=int, default=MAX_LENGTH)
     enc.add_argument("--threads", type=int, default=None)
     enc.add_argument("--int8", action="store_true", help="use the int8 backbone")
+    enc.add_argument(
+        "--raw", action="store_true", help="fp32 without the fused graph (slower)"
+    )
     enc.add_argument("--model", default=None, help="path to a custom backbone .onnx")
     enc.set_defaults(func=_cmd_encode)
     q = sub.add_parser(
@@ -136,6 +157,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--keep-embeddings", action="store_true", help="leave Gather in fp32"
     )
     q.set_defaults(func=_cmd_quantize)
+    f = sub.add_parser(
+        "fuse",
+        help='build the fused fp32 graph (needs pip install "bge-m3-lite[quant]")',
+    )
+    f.add_argument("--output", type=Path, default=None, help="default: cache dir")
+    f.set_defaults(func=_cmd_fuse)
     return parser
 
 

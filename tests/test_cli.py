@@ -7,7 +7,7 @@ def test_info(capsys, monkeypatch, tmp_path):
     assert main(["info"]) == 0
     out = capsys.readouterr().out
     assert __version__ in out and "model.onnx_data" in out and "missing" in out
-    assert "model_int8.onnx" in out
+    assert "model_int8.onnx" in out and "model_fused.onnx_data" in out
 
 
 def test_encode_flags():
@@ -15,4 +15,6 @@ def test_encode_flags():
     assert args.int8 and args.sparse and args.text == ["x"] and args.model is None
     assert args.batch_size == 12 and args.max_batch_tokens == 16384
     args = build_parser().parse_args(["encode", "--max-batch-tokens", "4096", "x"])
-    assert args.max_batch_tokens == 4096
+    assert args.max_batch_tokens == 4096 and not args.raw
+    assert build_parser().parse_args(["encode", "--raw", "x"]).raw
+    assert build_parser().parse_args(["fuse"]).output is None

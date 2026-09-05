@@ -79,3 +79,14 @@ def test_int8_url_override(monkeypatch):
 def test_pid_alive():
     assert hub._pid_alive(hub.os.getpid())
     assert not hub._pid_alive(999999999)
+
+
+def test_fused_files_and_url_override(monkeypatch):
+    names = [f.name for f in hub.FUSED_FILES]
+    assert names == ["model_fused.onnx", "model_fused.onnx_data"]
+    assert all(f.remote_path.startswith("https://github.com/") for f in hub.FUSED_FILES)
+    assert hub.FUSED_FILES[0].size < 1 << 20 and hub.FUSED_FILES[1].size < 400 << 20
+    monkeypatch.setenv("BGE_M3_LITE_FUSED_URL", "https://mirror.example/fused/")
+    assert hub.file_url(hub.FUSED_FILES[1]) == (
+        "https://mirror.example/fused/model_fused.onnx_data"
+    )

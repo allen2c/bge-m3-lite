@@ -54,13 +54,19 @@ docker run --rm --platform linux/arm64 -v $PWD:/src:ro python:3.12-slim sh -c \
 
 ## Release assets
 
-`model_int8.onnx` (543 MiB) is not on the Hub. Build it with
-`bge-m3-lite quantize`, check the printed SHA-256 against `hub.INT8_FILE`, and
-upload it to the GitHub release named in `hub.INT8_RELEASE`:
+Model files are never part of the wheel. Two kinds of assets are attached to
+the GitHub release named in `hub.py`, each pinned there by size and SHA-256:
 
 ```bash
-gh release create v0.0.2 ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx --title v0.0.2
+bge-m3-lite fuse        # model_fused.onnx + model_fused.onnx_data (hub.FUSED_FILES)
+bge-m3-lite quantize    # model_int8.onnx (hub.INT8_FILE)
+gh release upload v0.2.0 ~/.cache/bge-m3-lite/BAAI--bge-m3/model_fused.onnx \
+    ~/.cache/bge-m3-lite/BAAI--bge-m3/model_fused.onnx_data
 ```
+
+Both builds are deterministic; compare the printed digests with `hub.py`
+before uploading. A file that is already in the cache with the right size and
+digest is used without downloading.
 
 ## Roadmap
 

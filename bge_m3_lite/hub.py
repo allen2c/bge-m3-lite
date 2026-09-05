@@ -83,6 +83,27 @@ INT8_FILE = RemoteFile(
     569872326,
     "63e806d9763c82e8ffb55e32d577a64cacf2a57be1ac0d803f118cf770cb399d",
 )
+
+# Fused fp32 backbone (Attention / SkipLayerNorm / BiasGelu contrib ops, built by
+# ``bge-m3-lite fuse``, see docs/fusion.md). The graph references the Hub
+# weights in ``model.onnx_data`` by offset; only the merged QKV projections
+# live in ``model_fused.onnx_data``. Override the base URL with
+# BGE_M3_LITE_FUSED_URL.
+FUSED_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.2.0"
+FUSED_FILES: tuple[RemoteFile, ...] = (
+    RemoteFile(
+        "model_fused.onnx",
+        f"{FUSED_RELEASE}/model_fused.onnx",
+        158714,
+        "423816f3d199b600bc2d452fc57252fd60d69ae299f29cc32a0d72d3acbca29f",
+    ),
+    RemoteFile(
+        "model_fused.onnx_data",
+        f"{FUSED_RELEASE}/model_fused.onnx_data",
+        302284800,
+        "d90723fed1af6a11089cbed0e0ae148366c502a8475a6cf22a5aa69d466c84e5",
+    ),
+)
 VERIFY_LIMIT = 64 << 20  # files smaller than this are digest-checked on every load
 
 
@@ -102,6 +123,9 @@ def hf_endpoint() -> str:
 def file_url(remote: RemoteFile) -> str:
     if remote is INT8_FILE and os.environ.get("BGE_M3_LITE_INT8_URL"):
         return os.environ["BGE_M3_LITE_INT8_URL"]
+    if remote in FUSED_FILES and os.environ.get("BGE_M3_LITE_FUSED_URL"):
+        base = os.environ["BGE_M3_LITE_FUSED_URL"].rstrip("/")
+        return f"{base}/{remote.name}"
     if remote.remote_path.startswith(("https://", "http://")):
         return remote.remote_path
     return f"{hf_endpoint()}/{REPO_ID}/resolve/{REVISION}/{remote.remote_path}"

@@ -14,7 +14,7 @@ step is gated by the fixtures in `tests/fixtures/` staying green.
 | warm start-up was 0.86 s: tokenizer parse 0.31 s, ORT session 0.44 s; cold start is bound by reading 2.3 GB from disk | v0.1 caches the parsed vocabulary (0.31 s → 0.05 s); the rest needs a smaller model (int8: 543 MB) |
 | a batch of 12 texts × 8192 tokens allocates more than the 400 MiB hidden state: the unfused attention materialises `batch × 16 × seq²` floats | token-budget batching (v0.1) bounds memory by padded tokens instead of text count |
 
-## v0.1.0 — API, start-up, Windows (this release)
+## v0.1.0 — API, start-up, Windows (done)
 
 - `encode_queries` / `encode_corpus` with separate default lengths
   (`query_max_length=512`, `passage_max_length=max_length`), `compute_score`
@@ -29,15 +29,14 @@ step is gated by the fixtures in `tests/fixtures/` staying green.
 
 ## v0.2.0 — fused fp32 backbone (lossless, faster)
 
-- Ship `model_fused.onnx` (graph only, ~160 KB) as a release asset. The graph
-  references the unchanged tensors in the cached `model.onnx_data` by offset and
-  the 48 merged QKV tensors in a 288 MiB `model_fused.onnx_data` that
-  `bge-m3-lite` writes locally with numpy on first use (deterministic, hashed).
-- `precision="fp32"` uses the fused graph once the slow suite passes on all
-  runners; `fused=False` keeps the raw export. Measured on M4: +13–14 % at
-  128/512 tokens; Linux (no Accelerate) expected higher, to be measured by the
-  CI `bench` job.
-- `bge-m3-lite fuse` (needs the `quant` extra) rebuilds the graph asset.
+- `model_fused.onnx` (graph, 155 KB) + `model_fused.onnx_data` (the 48 merged
+  QKV tensors, 288 MiB) as release assets, pinned by size + SHA-256. The graph
+  references the unchanged tensors of the cached `model.onnx_data` by offset,
+  so no second 2.3 GB download. `bge-m3-lite fuse` rebuilds both
+  deterministically (needs the `quant` extra).
+- `BGEM3Embedder(fused=True)` is the default for fp32; `fused=False` /
+  `encode --raw` keeps the raw export. Measured on M4: +10–14 % at 128/512
+  tokens, outputs identical; Linux numbers from the CI `bench` job.
 
 ## v0.3.0 — int8 v2 (accuracy)
 

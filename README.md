@@ -60,7 +60,7 @@ memory.
 ### CLI
 
 ```bash
-bge-m3-lite download                     # pre-fetch the model files
+bge-m3-lite download                     # pre-fetch the model files (2.3 GB + 288 MB fused)
 bge-m3-lite info                         # cache state
 echo "hello" | bge-m3-lite encode --sparse --colbert --tokens
 ```
@@ -73,6 +73,7 @@ echo "hello" | bge-m3-lite encode --sparse --colbert --tokens
 | `HF_ENDPOINT` | Hugging Face mirror, e.g. `https://hf-mirror.com` |
 | `BGE_M3_LITE_OFFLINE=1` | never download, fail if files are missing |
 | `BGE_M3_LITE_THREADS` | onnxruntime intra-op threads (default: physical cores) |
+| `BGE_M3_LITE_FUSED_URL`, `BGE_M3_LITE_INT8_URL` | mirror for the fused / int8 release assets |
 
 Model files are pinned to a specific Hugging Face revision and verified by
 SHA-256 after download.
@@ -83,5 +84,6 @@ See `AGENTS.md` and `docs/` (architecture, tokenizer, verification, development)
 
 ## Status
 
-v0.1.0: fp32 with exact parity with FlagEmbedding, opt-in int8 backbone,
-retrieval helpers, token-budget batching, Windows. Plan: `docs/roadmap.md`.
+v0.2.0: fp32 with exact parity with FlagEmbedding (fused graph by default),
+opt-in int8 backbone, retrieval helpers, token-budget batching, Windows.
+Plan: `docs/roadmap.md`.

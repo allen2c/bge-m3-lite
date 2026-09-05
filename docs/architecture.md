@@ -25,6 +25,7 @@ Formulas follow `FlagEmbedding/inference/embedder/encoder_only/m3.py` and
 | `_torch_pickle.py` | torch-free loader for the two `.pt` heads (strict class allowlist) |
 | `hub.py` | pinned file table, SHA-256, resumable download, cross-process lock |
 | `model.py` | `OnnxBackbone`: ORT session, CPU provider, `ORT_ENABLE_ALL` |
+| `fuse.py`, `quantize.py` | build-time only (`quant` extra): fused fp32 graph, int8 backbone |
 | `embedder.py` | `BGEM3Embedder`: batching (longest first, text + token budget), pooling, `compute_score` |
 | `cli.py` | `bge-m3-lite download / info / encode / quantize` |
 
@@ -33,6 +34,7 @@ Formulas follow `FlagEmbedding/inference/embedder/encoder_only/m3.py` and
 | file | size | note |
 |---|---|---|
 | `onnx/model.onnx` + `model.onnx_data` + `Constant_7_attr__value` | 2.27 GB | official opset-11 export, outputs `token_embeddings`, `sentence_embedding` |
+| `model_fused.onnx` + `model_fused.onnx_data` (release asset) | 288 MB | fused graph, shares `model.onnx_data` (`docs/fusion.md`) |
 | `sentencepiece.bpe.model` | 5 MB | 250 000 pieces, unigram, `nmt_nfkc` precompiled charsmap |
 | `sentencepiece.bpe.model.cache` | 4 MB | written locally on first load: parsed vocabulary keyed by the model's SHA-256 (no pickle) |
 | `colbert_linear.pt` | 2 MB | Linear(1024→1024), stored fp16 |

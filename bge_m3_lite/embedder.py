@@ -37,11 +37,14 @@ class BGEM3Embedder:
         max_length: int = MAX_LENGTH,
         quiet: bool = False,
         precision: Literal["fp32", "int8"] = "fp32",
+        fused: bool = True,
         model_path: str | Path | None = None,
         query_max_length: int = QUERY_MAX_LENGTH,
         passage_max_length: int | None = None,
     ) -> None:
         """``precision="int8"`` uses the quantised backbone (see docs/quantization.md);
+        ``fused=False`` runs the raw Hub export instead of the fused fp32 graph
+        (same outputs, slower; see docs/fusion.md);
         ``model_path`` points at any backbone ONNX file and skips the download.
 
         ``query_max_length`` / ``passage_max_length`` are the defaults for
@@ -58,12 +61,14 @@ class BGEM3Embedder:
                 hub.INT8_FILE.name
             ]
         elif precision == "fp32":
-            backbone_path = hub.ensure_files(hub.MODEL_FILES, cache_dir, quiet=quiet)[
-                "model.onnx"
-            ]
+            paths = hub.ensure_files(hub.MODEL_FILES, cache_dir, quiet=quiet)
+            if fused:  # the fused graph reads the Hub weights next to it by offset
+                paths = hub.ensure_files(hub.FUSED_FILES, cache_dir, quiet=quiet)
+            backbone_path = paths["model_fused.onnx" if fused else "model.onnx"]
         else:
             raise ValueError(f"unknown precision {precision!r}")
         self.precision = precision
+        self.fused = fused and precision == "fp32" and model_path is None
         self.tokenizer = XLMRobertaTokenizer.from_file(files["sentencepiece.bpe.model"])
         self.backbone = OnnxBackbone(backbone_path, num_threads=num_threads)
         self.max_length = max_length
