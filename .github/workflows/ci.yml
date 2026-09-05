@@ -65,9 +65,14 @@ jobs:
           python-version: "3.12"
       - run: uv sync --group dev --group quant
       - run: uv run bge-m3-lite --quiet download
-      - run: uv run python -c "from bge_m3_lite import hub; hub.ensure_files((hub.INT8_FILE,), quiet=True)"
+      - name: fetch the shipped int8 asset (may not exist yet before a release)
+        run: uv run python -c "from bge_m3_lite import hub; hub.ensure_files((hub.INT8_FILE,), quiet=True)" || echo "::warning::int8 asset not available"
       - run: uv run python -c "import platform; print(platform.machine(), platform.processor())"; lscpu 2>/dev/null | grep -i -E "model name|flags" | cut -c1-400 || true
-      - run: uv run tools/eval_model.py ~/.cache/bge-m3-lite/BAAI--bge-m3/model.onnx ~/.cache/bge-m3-lite/BAAI--bge-m3/model_fused.onnx ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx
+      - shell: bash
+        run: |
+          cd ~/.cache/bge-m3-lite/BAAI--bge-m3
+          files="model.onnx model_fused.onnx"; [ -f model_int8.onnx ] && files="$files model_int8.onnx"
+          uv run --project "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/eval_model.py" $files
       - name: quantize variants
         if: ${{ inputs.quantize_variants != '' }}
         shell: bash
