@@ -15,7 +15,7 @@ here from scratch. Read `docs/` before changing anything non-trivial.
 ## Commands
 
 ```bash
-uv sync --group dev
+uv sync --group dev --group quant   # quant: onnx for pyright + quantize
 uv run ruff format . && uv run ruff check . && uv run pyright
 uv run pyproject-fmt --check pyproject.toml
 uv run pytest                                   # fast

@@ -12,7 +12,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
-      - run: uv sync --group dev
+      - run: uv sync --group dev --group quant
       - run: uv run ruff check . && uv run pyright && uv run pytest -q
       - name: check tag matches package version
         run: |

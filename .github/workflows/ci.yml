@@ -28,8 +28,9 @@ jobs:
         with:
           path: ~/.cache/bge-m3-lite
           key: bge-m3-small-files-v1
-      - run: uv sync --group dev
+      - run: uv sync --group dev --group quant
       - run: uv run ruff check . && uv run ruff format --check .
+      - run: uv run pyright && uv run pyproject-fmt --check pyproject.toml
       - run: uv run pytest -q
       - name: platform smoke
         run: uv run python -c "import platform, onnxruntime as ort; print(platform.machine(), ort.__version__, ort.get_available_providers())"
