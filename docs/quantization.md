@@ -62,6 +62,9 @@ zero point (`--symmetric`) are 5× slower on x86: MLAS has no s8·s8 kernel.
 | | **int8 v3 (shipped)** | **0.9984 / 0.9988** | **11/11** | **0.993** | **742** |
 | | int8 v0.3.0 (per-tensor + SmoothQuant) | 0.927 / 0.969 | 7/11 | 0.62 | 1069 |
 | | int8 per-tensor, no SmoothQuant (v0.0.2 recipe on the fused graph) | 0.978 / 0.985 | 5/11 | 0.93 | ~1000 |
+| x86_64 AMD EPYC 7763 (AVX2, no VNNI) | fp32 fused | 1.0 | 11/11 | 1.0 | 275 |
+| | **int8 v3** | **0.9984 / 0.9988** | **10/11** | **0.993** | **352** |
+| | int8 v0.3.0 | 0.927 / 0.969 | 7/11 | 0.62 | 508 |
 | aarch64 Neoverse-N2 | fp32 fused | 1.0 | 11/11 | 1.0 | 316 |
 | | **int8 v3** | **0.9986 / 0.9988** | **10/11** | **0.990** | **1120** |
 | | int8 v0.3.0 | 0.975 / 0.983 | 7/11 | 0.72 | 1323 |
@@ -82,7 +85,8 @@ Take-aways:
 - Sparse weights remain the most sensitive output; use fp32 when exact
   lexical scores matter.
 - x86 speed depends on VNNI: the Xeon runner does 1.5× fp32 with v3 (per-tensor
-  kernels 2×); an AMD EPYC 7763 (AVX2 only) gets about half of that.
+  kernels 2×); the AMD EPYC 7763 (AVX2 only) 1.3× (per-tensor 1.9×). The
+  u8·u8 weights are what make the AVX2 result correct at all.
 
 ## Building other variants
 

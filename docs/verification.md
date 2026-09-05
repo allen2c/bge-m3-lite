@@ -40,7 +40,7 @@ on all three Linux/macOS runners.
 | runner | CPU | fp32 fused 128-tok | int8 v3 128-tok | int8 speed-up |
 |---|---|---|---|---|
 | `ubuntu-latest` x86_64 | Xeon Platinum 8573C (AVX-512 VNNI) | ~490 tok/s | 742 tok/s | 1.5× |
-| `ubuntu-latest` x86_64 | AMD EPYC 7763 (AVX2) | 278 tok/s | n/a | (per-tensor int8: 1.9×) |
+| `ubuntu-latest` x86_64 | AMD EPYC 7763 (AVX2) | 275 tok/s | 352 tok/s | 1.3× |
 | `ubuntu-24.04-arm` | Neoverse-N2 | 316 tok/s | 1120 tok/s | 3.5× |
 | `macos-latest` (VM) | Apple Silicon, 3 cores | 127 tok/s | 319 tok/s | 2.5× |
 
