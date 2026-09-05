@@ -75,6 +75,8 @@ def test_cli_quantize_smooth_flags():
     from bge_m3_lite.cli import build_parser
 
     args = build_parser().parse_args(["quantize"])
-    assert args.alpha == 0.5 and not args.no_smooth and args.calibration is None
-    args = build_parser().parse_args(["quantize", "--no-smooth", "--alpha", "0.7"])
-    assert args.no_smooth and args.alpha == 0.7
+    assert args.method == "rowwise" and args.alpha is None and args.calibration is None
+    args = build_parser().parse_args(
+        ["quantize", "--method", "dynamic", "--alpha", "0.7"]
+    )
+    assert args.method == "dynamic" and args.alpha == 0.7

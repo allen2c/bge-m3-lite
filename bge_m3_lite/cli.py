@@ -160,7 +160,9 @@ def build_parser() -> argparse.ArgumentParser:
         help='build the int8 backbone (needs pip install "bge-m3-lite[quant]")',
     )
     q.add_argument("--output", type=Path, default=None, help="default: cache dir")
-    q.add_argument("--method", choices=["dynamic", "nbits"], default="dynamic")
+    q.add_argument(
+        "--method", choices=["rowwise", "dynamic", "nbits"], default="rowwise"
+    )
     q.add_argument("--bits", type=int, default=8)
     q.add_argument("--block-size", type=int, default=128, help="nbits only")
     q.add_argument(

@@ -43,7 +43,7 @@ SMOOTH_TARGETS = (  # node-name patterns of the projections to smooth (fused gra
 
 @dataclass(frozen=True)
 class QuantConfig:
-    method: Literal["dynamic", "nbits"] = "dynamic"
+    method: Literal["rowwise", "dynamic", "nbits"] = "rowwise"
     bits: int = 8
     block_size: int = 128
     accuracy_level: int = 4  # 0 = fp32 compute, 4 = int8 compute (nbits only)
@@ -95,7 +95,21 @@ def quantize(
         ops.append("Attention")
         if not any(o.domain == "com.microsoft" for o in model.opset_import):
             model.opset_import.add(domain="com.microsoft", version=1)
-    if config.method == "dynamic":
+    if config.method == "rowwise":
+        if not fused:
+            raise ValueError("rowwise quantisation needs the fused graph")
+        if config.smooth_alpha is not None:
+            texts = (
+                list(calibration_texts)
+                if calibration_texts is not None
+                else load_calibration_texts()
+            )
+            tok = tokenizer_path or model_in.with_name("sentencepiece.bpe.model")
+            stats = _activation_stats(model_in, model, texts, tok, config)
+            _smooth(model, stats, config.smooth_alpha)
+        _quantize_rowwise(model, quantize_embeddings=config.quantize_embeddings)
+        onnx.save_model(model, str(model_out))
+    elif config.method == "dynamic":
         if config.smooth_alpha is not None and fused:
             texts = (
                 list(calibration_texts)
@@ -233,3 +247,139 @@ def _smooth(model: Any, stats: dict[str, np.ndarray], alpha: float) -> None:
         model.graph.node.insert(nodes.index(node), mul)
         nodes.insert(nodes.index(node), mul)
         node.input[0] = smoothed
+
+
+# -- row-wise dynamic int8 (platform independent) ------------------------------
+#
+# ORT's ``quantize_dynamic`` quantises activations per *tensor* (one uint8
+# scale for the whole (batch, seq, hidden) block). Its ``DynamicQuantizeMatMul``
+# kernel on Apple Silicon (KleidiAI) silently switches to per-row scales and is
+# far more accurate (dense cosine 0.998 vs 0.983 elsewhere). The graph below
+# spells that per-row scheme out with standard ops so every platform gets it:
+#
+#   Xr = Reshape(X, [-1, K]);  s = max|Xr| / 127 per row
+#   Xq = int8(round(Xr / s));  Y = MatMulInteger(Xq, Wq) * s * w_scale
+#
+# with per-column symmetric int8 weights. The merged QKV ``Attention`` op is
+# split into the same quantised projection + ``MultiHeadAttention``.
+
+_QI8_MAX = 127.0
+
+
+def _quantize_rowwise(model: Any, *, quantize_embeddings: bool) -> None:
+    import onnx
+    from onnx import helper, numpy_helper
+
+    graph = model.graph
+    inits = {t.name: t for t in graph.initializer}
+    consts: list[Any] = []
+    new_nodes: list[Any] = []
+
+    def const(name: str, value: np.ndarray) -> str:
+        consts.append(numpy_helper.from_array(value, name))
+        return name
+
+    c_i8max = const("rowwise/i8max", np.array(_QI8_MAX, dtype=np.float32))
+    c_eps = const("rowwise/eps", np.array(1e-10, dtype=np.float32))
+    c_lo = const("rowwise/lo", np.array(-_QI8_MAX, dtype=np.float32))
+    c_hi = const("rowwise/hi", np.array(_QI8_MAX, dtype=np.float32))
+    c_slice0 = const("rowwise/s0", np.array([0], dtype=np.int64))
+    c_slice2 = const("rowwise/s2", np.array([2], dtype=np.int64))
+
+    def rowwise_matmul(prefix: str, x: str, w_name: str, out: str) -> list[Any]:
+        """Nodes computing ``out = x @ W`` with per-row int8 activations."""
+        w = numpy_helper.to_array(inits[w_name]).astype(np.float32)  # (K, N)
+        k, n = w.shape
+        w_scale = np.maximum(np.abs(w).max(axis=0) / _QI8_MAX, 1e-12)
+        w_q = np.clip(np.round(w / w_scale), -_QI8_MAX, _QI8_MAX).astype(np.int8)
+        inits[w_name].CopyFrom(numpy_helper.from_array(w_q, w_name))
+        ws = const(f"{prefix}/w_scale", w_scale.astype(np.float32).reshape(1, n))
+        shp = const(f"{prefix}/shape2d", np.array([-1, k], dtype=np.int64))
+        n_const = const(f"{prefix}/n", np.array([n], dtype=np.int64))
+        p = prefix
+        return [
+            helper.make_node("Reshape", [x, shp], [f"{p}/x2d"]),
+            helper.make_node("Abs", [f"{p}/x2d"], [f"{p}/abs"]),
+            helper.make_node(
+                "ReduceMax", [f"{p}/abs"], [f"{p}/amax"], axes=[1], keepdims=1
+            ),
+            helper.make_node("Div", [f"{p}/amax", c_i8max], [f"{p}/scale0"]),
+            helper.make_node("Max", [f"{p}/scale0", c_eps], [f"{p}/scale"]),
+            helper.make_node("Div", [f"{p}/x2d", f"{p}/scale"], [f"{p}/xs"]),
+            helper.make_node("Round", [f"{p}/xs"], [f"{p}/xr"]),
+            helper.make_node("Clip", [f"{p}/xr", c_lo, c_hi], [f"{p}/xc"]),
+            helper.make_node(
+                "Cast", [f"{p}/xc"], [f"{p}/xq"], to=onnx.TensorProto.INT8
+            ),
+            helper.make_node("MatMulInteger", [f"{p}/xq", w_name], [f"{p}/y32"]),
+            helper.make_node(
+                "Cast", [f"{p}/y32"], [f"{p}/yf"], to=onnx.TensorProto.FLOAT
+            ),
+            helper.make_node("Mul", [f"{p}/yf", f"{p}/scale"], [f"{p}/ys"]),
+            helper.make_node("Mul", [f"{p}/ys", ws], [f"{p}/y2d"]),
+            helper.make_node("Shape", [x], [f"{p}/xshape"]),
+            helper.make_node("Slice", [f"{p}/xshape", c_slice0, c_slice2], [f"{p}/bs"]),
+            helper.make_node("Concat", [f"{p}/bs", n_const], [f"{p}/yshape"], axis=0),
+            helper.make_node("Reshape", [f"{p}/y2d", f"{p}/yshape"], [out]),
+        ]
+
+    for node in graph.node:
+        if node.op_type == "MatMul" and node.input[1] in inits:
+            prefix = f"rowwise/{node.name or node.output[0]}"
+            new_nodes.extend(
+                rowwise_matmul(prefix, node.input[0], node.input[1], node.output[0])
+            )
+        elif node.op_type == "Attention" and node.domain == "com.microsoft":
+            x, w_name, bias, mask = node.input[:4]
+            heads = next(a.i for a in node.attribute if a.name == "num_heads")
+            prefix = f"rowwise/{node.name}"
+            new_nodes.extend(rowwise_matmul(prefix, x, w_name, f"{prefix}/qkv"))
+            new_nodes.append(
+                helper.make_node(
+                    "Split",
+                    [f"{prefix}/qkv"],
+                    [f"{prefix}/q", f"{prefix}/k", f"{prefix}/v"],
+                    axis=2,
+                )
+            )
+            new_nodes.append(
+                helper.make_node(
+                    "MultiHeadAttention",
+                    [f"{prefix}/q", f"{prefix}/k", f"{prefix}/v", bias, mask],
+                    [node.output[0]],
+                    domain="com.microsoft",
+                    num_heads=heads,
+                )
+            )
+        elif (
+            node.op_type == "Gather"
+            and quantize_embeddings
+            and node.input[0] in inits
+            and len(inits[node.input[0]].dims) == 2
+            and inits[node.input[0]].dims[0] > 10000
+        ):
+            # word embeddings: int8 rows with one scale per row
+            w_name = node.input[0]
+            w = numpy_helper.to_array(inits[w_name]).astype(np.float32)
+            scale = np.maximum(np.abs(w).max(axis=1, keepdims=True) / _QI8_MAX, 1e-12)
+            w_q = np.clip(np.round(w / scale), -_QI8_MAX, _QI8_MAX).astype(np.int8)
+            inits[w_name].CopyFrom(numpy_helper.from_array(w_q, w_name))
+            sc = const(f"{w_name}/row_scale", scale.astype(np.float32))
+            p = f"rowwise/{node.name or node.output[0]}"
+            new_nodes.extend(
+                [
+                    helper.make_node("Gather", [w_name, node.input[1]], [f"{p}/eq"]),
+                    helper.make_node("Gather", [sc, node.input[1]], [f"{p}/es"]),
+                    helper.make_node(
+                        "Cast", [f"{p}/eq"], [f"{p}/ef"], to=onnx.TensorProto.FLOAT
+                    ),
+                    helper.make_node("Mul", [f"{p}/ef", f"{p}/es"], [node.output[0]]),
+                ]
+            )
+        else:
+            new_nodes.append(node)
+    del graph.node[:]
+    graph.node.extend(new_nodes)
+    graph.initializer.extend(consts)
+    # value_info entries of the raw export may now carry stale types
+    del graph.value_info[:]
