@@ -5,7 +5,9 @@ from bge_m3_lite.quantize import QuantConfig
 
 def test_default_config_is_shipped_profile():
     cfg = QuantConfig()
-    assert cfg.method == "dynamic" and cfg.quantize_embeddings
+    assert (
+        cfg.method == "rowwise" and cfg.quantize_embeddings and cfg.smooth_alpha == 0.5
+    )
 
 
 def test_embedder_rejects_unknown_precision(tokenizer_path, head_paths):
@@ -75,8 +77,6 @@ def test_cli_quantize_smooth_flags():
     from bge_m3_lite.cli import build_parser
 
     args = build_parser().parse_args(["quantize"])
-    assert args.method == "rowwise" and args.alpha is None and args.calibration is None
-    args = build_parser().parse_args(
-        ["quantize", "--method", "dynamic", "--alpha", "0.7"]
-    )
-    assert args.method == "dynamic" and args.alpha == 0.7
+    assert args.method == "rowwise" and args.alpha == 0.5 and not args.no_smooth
+    args = build_parser().parse_args(["quantize", "--method", "dynamic", "--no-smooth"])
+    assert args.method == "dynamic" and args.no_smooth
