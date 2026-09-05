@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      slow:
+        description: "run full-model tests (downloads 2.3 GB)"
+        type: boolean
+        default: false
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, arch: arm64 }        # Apple Silicon
+          - { os: ubuntu-latest, arch: x86_64 }     # Linux x86_64
+          - { os: ubuntu-24.04-arm, arch: aarch64 } # Linux ARM64
+        python: ["3.11", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/bge-m3-lite
+          key: bge-m3-small-files-v1
+      - run: uv sync --group dev
+      - run: uv run ruff check . && uv run ruff format --check .
+      - run: uv run pytest -q
+      - name: platform smoke
+        run: uv run python -c "import platform, onnxruntime as ort; print(platform.machine(), ort.__version__, ort.get_available_providers())"
+
+  slow:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.slow }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --group dev
+      - run: uv run bge-m3-lite --quiet download
+      - run: BGE_M3_LITE_RUN_SLOW=1 uv run pytest -q -m slow
