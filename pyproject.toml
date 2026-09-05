@@ -4,7 +4,7 @@ requires = [ "uv-build>=0.8,<0.13" ]
 
 [project]
 name = "bge-m3-lite"
-version = "0.0.2"
+version = "0.1.0"
 description = """\
   Lightweight CPU inference for BAAI/bge-m3 (dense + sparse + ColBERT) with onnxruntime as the only dependency.\
   """
@@ -17,6 +17,7 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",

@@ -38,11 +38,20 @@ used as-is when its size and digest match.
 | fp32 | 1.0 | 11/11 | 1.0 | 641 |
 | dynamic int8 (shipped) | 0.987 | 6/11 | 0.95 | 1627 (**2.5×**) |
 
+## Measured on GitHub-hosted runners (4 vCPU, `tools/eval_model.py`)
+
+| runner | dense cos mean | sparse top-5 same | colbert p5 | fp32 → int8 128-tok |
+|---|---|---|---|---|
+| x86_64 Xeon 8573C (VNNI) | 0.987 | 4/11 | 0.92 | 491 → 1914 tok/s (**3.9×**) |
+| aarch64 Neoverse-N2 | 0.988 | 5/11 | 0.95 | 298 → 1272 tok/s (**4.3×**) |
+| macOS VM (3 cores) | 0.988 | 6/11 | 0.95 | 77 → 316 tok/s (4.1×) |
+
 Take-aways:
 
-- On macOS fp32 is already fast (Accelerate); int8 gives ~10% speed and 4×
-  less memory. On Linux ARM the fp32 kernels are much slower and int8 is 2.5×
-  faster. x86 (VNNI) numbers come from the CI `bench` workflow.
+- On Apple Silicon (native) fp32 is already fast (Accelerate); int8 gives ~10%
+  speed and 4× less memory. On Linux x86 (VNNI) and ARM the fp32 kernels are
+  much slower and int8 is 4× faster, which is why v0.3 invests in int8 accuracy
+  (`roadmap.md`).
 - The accuracy loss of dynamic quantisation comes from per-tensor activation
   quantisation (outlier channels), not from the weights: weight-only 8-bit with
   fp32 compute is near-lossless but no faster.

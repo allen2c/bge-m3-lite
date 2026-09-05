@@ -74,3 +74,8 @@ def test_int8_url_override(monkeypatch):
     assert hub.file_url(hub.INT8_FILE) == "https://mirror.example/int8.onnx"
     monkeypatch.setenv("HF_ENDPOINT", "https://hf.example")
     assert hub.file_url(hub.TOKENIZER_FILES[0]).startswith("https://hf.example/BAAI")
+
+
+def test_pid_alive():
+    assert hub._pid_alive(hub.os.getpid())
+    assert not hub._pid_alive(999999999)

@@ -173,6 +173,16 @@ def _acquire_lock(lock: Path, timeout: float = 6 * 3600) -> None:
 
 
 def _pid_alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        # os.kill(pid, 0) would *terminate* the process on Windows.
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION
+        if not handle:
+            return kernel32.GetLastError() == 5  # ERROR_ACCESS_DENIED: exists
+        kernel32.CloseHandle(handle)
+        return True
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from bge_m3_lite import __version__, hub
+from bge_m3_lite.embedder import BATCH_SIZE, MAX_BATCH_TOKENS, MAX_LENGTH
 
 
 def _cmd_download(args: argparse.Namespace) -> int:
@@ -61,6 +62,7 @@ def _cmd_encode(args: argparse.Namespace) -> int:
     out = embedder.encode(
         texts,
         batch_size=args.batch_size,
+        max_batch_tokens=args.max_batch_tokens,
         max_length=args.max_length,
         return_dense=True,
         return_sparse=args.sparse,
@@ -105,8 +107,16 @@ def build_parser() -> argparse.ArgumentParser:
     enc.add_argument(
         "--tokens", action="store_true", help="lexical keys as tokens, not ids"
     )
-    enc.add_argument("--batch-size", type=int, default=12)
-    enc.add_argument("--max-length", type=int, default=8192)
+    enc.add_argument(
+        "--batch-size", type=int, default=BATCH_SIZE, help="texts per batch"
+    )
+    enc.add_argument(
+        "--max-batch-tokens",
+        type=int,
+        default=MAX_BATCH_TOKENS,
+        help="padded tokens per batch (bounds memory on long inputs)",
+    )
+    enc.add_argument("--max-length", type=int, default=MAX_LENGTH)
     enc.add_argument("--threads", type=int, default=None)
     enc.add_argument("--int8", action="store_true", help="use the int8 backbone")
     enc.add_argument("--model", default=None, help="path to a custom backbone .onnx")

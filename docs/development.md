@@ -36,7 +36,7 @@ docker run --rm --platform linux/arm64 -v $PWD:/src:ro python:3.12-slim sh -c \
 2. Run every check above, including the slow suite.
 3. Tag and push:
    ```bash
-   git tag -a v0.0.1 -m "v0.0.1"
+   git tag -a v0.1.0 -m "v0.1.0"
    git push origin main --tags
    ```
 4. Pushing the tag runs `.github/workflows/release.yml`: checks, build, then
@@ -64,8 +64,4 @@ gh release create v0.0.2 ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx --tit
 
 ## Roadmap
 
-- Benchmark int8 on x86 (VNNI) and Linux ARM via the CI `bench` workflow.
-- Cache the ORT-optimised graph to cut the 3 s start-up.
-- Static/SmoothQuant calibration if int8 sparse ordering must improve.
-- Fused attention via `onnxruntime.transformers` at build time.
-- Rust/maturin kernels only if ORT int8 underperforms on Apple Silicon.
+See `roadmap.md` for the version plan and the measurements behind it.

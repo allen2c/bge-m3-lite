@@ -17,6 +17,8 @@ Implementation notes were taken from ``sentencepiece/src/normalizer.cc``, the
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import os
 import re
 import struct
@@ -74,6 +76,7 @@ class PrecompiledCharsmap:
     """SentencePiece ``precompiled_charsmap`` with Hugging Face's application rule."""
 
     def __init__(self, blob: bytes) -> None:
+        self.blob = blob
         (trie_size,) = struct.unpack("<I", blob[:4])
         self._trie = _DoubleArrayTrie(blob[4 : 4 + trie_size])
         self._normalized = blob[4 + trie_size :]
@@ -120,6 +123,44 @@ class PrecompiledCharsmap:
         return all(0x20 <= ord(c) < 0x7F for c in text)
 
 
+def _parse_piece(buf: bytes) -> tuple[str, float, int]:
+    """Decode one ``SentencePiece`` message: ``piece`` (1), ``score`` (2), ``type`` (3).
+
+    Hand-rolled for the 250 000 pieces of the XLM-R vocabulary: the generic
+    :func:`_proto.as_message` path is three times slower at load time.
+    """
+    pos, end = 0, len(buf)
+    piece, score, ptype = "", 0.0, _PIECE_NORMAL
+    while pos < end:
+        key = buf[pos]
+        pos += 1
+        if key == 0x0A:  # field 1, length-delimited
+            length = buf[pos]
+            pos += 1
+            if length & 0x80:  # two-byte varint (pieces longer than 127 bytes)
+                length = (length & 0x7F) | (buf[pos] << 7)
+                pos += 1
+            piece = buf[pos : pos + length].decode("utf-8")
+            pos += length
+        elif key == 0x15:  # field 2, fixed32
+            score = _unpack_f32(buf, pos)[0]
+            pos += 4
+        elif key == 0x18 and buf[pos] < 0x80:  # field 3, one-byte varint
+            ptype = buf[pos]
+            pos += 1
+        else:  # anything unusual: fall back to the generic decoder
+            msg = _proto.as_message(buf)
+            return (
+                _proto.get_bytes(msg, 1).decode("utf-8"),
+                _proto.as_float32(_proto.get_bytes(msg, 2, b"\0\0\0\0")),
+                _proto.get_int(msg, 3, _PIECE_NORMAL),
+            )
+    return piece, score, ptype
+
+
+_unpack_f32 = struct.Struct("<f").unpack_from
+
+
 @dataclass(frozen=True)
 class SentencePieceModel:
     pieces: list[str]
@@ -139,11 +180,10 @@ class SentencePieceModel:
             if not isinstance(value, bytes):
                 continue
             if field == 1:  # repeated SentencePiece pieces
-                msg = _proto.as_message(value)
-                pieces.append(_proto.get_bytes(msg, 1).decode("utf-8"))
-                score = _proto.get_bytes(msg, 2)
-                scores.append(_proto.as_float32(score) if score else 0.0)
-                types.append(_proto.get_int(msg, 3, _PIECE_NORMAL))
+                piece, score, ptype = _parse_piece(value)
+                pieces.append(piece)
+                scores.append(score)
+                types.append(ptype)
             elif field == 2:
                 trainer = _proto.as_message(value)
             elif field == 3:
@@ -159,9 +199,88 @@ class SentencePieceModel:
         return cls(pieces, scores, types, unk_ids[0], charsmap)
 
     @classmethod
-    def from_file(cls, path: str | os.PathLike[str]) -> SentencePieceModel:
+    def from_file(
+        cls, path: str | os.PathLike[str], *, cache: bool = True
+    ) -> SentencePieceModel:
+        """Load the model; ``cache`` keeps a pre-parsed copy next to it.
+
+        Parsing 250 000 pieces in Python takes ~0.25 s, reading the cache
+        ~0.02 s. The cache is keyed by the SHA-256 of the model file and is
+        skipped silently when the directory is not writable.
+        """
         with open(path, "rb") as fh:
-            return cls.from_bytes(fh.read())
+            data = fh.read()
+        if not cache:
+            return cls.from_bytes(data)
+        cache_path = os.fspath(path) + ".cache"
+        digest = hashlib.sha256(data).hexdigest()
+        model = _read_cache(cache_path, digest)
+        if model is None:
+            model = cls.from_bytes(data)
+            _write_cache(cache_path, digest, model)
+        return model
+
+
+_CACHE_MAGIC = b"bge-m3-lite spm cache v1\n"
+
+
+def _read_cache(path: str, digest: str) -> SentencePieceModel | None:
+    try:
+        with open(path, "rb") as fh:
+            blob = fh.read()
+    except OSError:
+        return None
+    try:
+        head, body = blob.split(b"\n\n", 1)
+        magic, sha, unk, n, npiece, ncharsmap = head.split(b"\n")
+        if magic + b"\n" != _CACHE_MAGIC or sha.decode() != digest:
+            return None
+        n, npiece, ncharsmap = int(n), int(npiece), int(ncharsmap)
+        pieces = body[:npiece].decode("utf-8").split("\n")
+        pos = npiece
+        scores = list(struct.unpack_from(f"<{n}f", body, pos))
+        pos += 4 * n
+        types = list(body[pos : pos + n])
+        pos += n
+        charsmap_blob = body[pos : pos + ncharsmap]
+        if len(pieces) != n or len(types) != n or pos + ncharsmap != len(body):
+            return None
+    except (ValueError, struct.error, UnicodeDecodeError):
+        return None
+    charsmap = PrecompiledCharsmap(charsmap_blob) if charsmap_blob else None
+    return SentencePieceModel(pieces, scores, types, int(unk), charsmap)
+
+
+def _write_cache(path: str, digest: str, model: SentencePieceModel) -> None:
+    if any("\n" in piece for piece in model.pieces):
+        return
+    piece_blob = "\n".join(model.pieces).encode("utf-8")
+    charsmap_blob = model.charsmap.blob if model.charsmap is not None else b""
+    n = len(model.pieces)
+    head = b"\n".join(
+        [
+            _CACHE_MAGIC.rstrip(b"\n"),
+            digest.encode(),
+            str(model.unk_id).encode(),
+            str(n).encode(),
+            str(len(piece_blob)).encode(),
+            str(len(charsmap_blob)).encode(),
+        ]
+    )
+    body = (
+        piece_blob
+        + struct.pack(f"<{n}f", *model.scores)
+        + bytes(model.types)
+        + charsmap_blob
+    )
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "wb") as fh:
+            fh.write(head + b"\n\n" + body)
+        os.replace(tmp, path)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
 
 
 class UnigramModel:

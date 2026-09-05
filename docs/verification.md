@@ -19,20 +19,50 @@ Run with `BGE_M3_LITE_RUN_SLOW=1 uv run pytest -m slow` (tolerances 1e-4 / 1e-3)
 | platform | how | result |
 |---|---|---|
 | macOS arm64 (M4) | native | fast + slow suites pass |
-| Linux aarch64 | Docker `python:3.12-slim` on Apple Silicon | fast + slow suites pass, ORT 1.29.0; fp32 641 tok/s, int8 1627 tok/s |
-| Linux x86_64 | Docker with QEMU | fast suite passes, ORT 1.29.0 |
-| CI | `.github/workflows/ci.yml` matrix | not yet run on GitHub |
+| Linux aarch64 | Docker `python:3.12-slim` on Apple Silicon; CI `ubuntu-24.04-arm` | fast + slow suites pass, ORT 1.29.0 |
+| Linux x86_64 | CI `ubuntu-latest` (Xeon Platinum 8573C) | fast suite + full-model `bench` pass, fp32 exact |
+| Windows x86_64 | CI `windows-latest` | fast suite (v0.1.0) |
 
-`ubuntu-24.04-arm` runners are free for public repositories only.
+`ubuntu-24.04-arm` runners are free for public repositories only. The `bench`
+job (`workflow_dispatch`) downloads the model and runs `tools/eval_model.py`
+on all three Linux/macOS runners.
 
 ## Performance baseline (M4, fp32, ORT default threads)
 
 | workload | throughput |
 |---|---|
-| 16 tokens × 32 texts | 1970 tok/s (123 texts/s) |
-| 128 tokens × 16 | 1780 tok/s |
-| 512 tokens × 4 | 1540 tok/s |
+| 16 tokens × 32 texts | 2100 tok/s (131 texts/s) |
+| 128 tokens × 16 | 2007 tok/s |
+| 512 tokens × 4 | 1655 tok/s |
 
-Session start ≈ 3 s (int8: ≈ 1 s). int8 numbers: `docs/quantization.md`. One 128-token forward ≈ 77 GFLOP (302 M non-embedding
-parameters). Memory per batch ≈ `batch_size × seq_len × 4 KiB` for the hidden
-state, plus the 2.3 GB weights.
+## GitHub-hosted runners (2026-09-05, `tools/eval_model.py`, 4 vCPU)
+
+| runner | CPU | fp32 128-tok | int8 128-tok | int8 speed-up |
+|---|---|---|---|---|
+| `ubuntu-latest` x86_64 | Xeon Platinum 8573C (AVX-512 VNNI) | 491 tok/s | 1914 tok/s | 3.9× |
+| `ubuntu-24.04-arm` | Neoverse-N2 | 298 tok/s | 1272 tok/s | 4.3× |
+| `macos-latest` (VM) | Apple Silicon, 3 cores | 77 tok/s | 316 tok/s | 4.1× |
+
+fp32 is exact on every runner (dense cosine 1.0, sparse and ColBERT identical).
+The macOS runner is a throttled VM; use the M4 numbers above for Apple Silicon.
+
+## Start-up (M4, files in the page cache)
+
+| step | v0.0.2 | v0.1.0 |
+|---|---|---|
+| imports | 0.07 s | 0.07 s |
+| tokenizer (250 000 pieces) | 0.31 s | 0.05 s (vocabulary cache) |
+| ORT session, fp32 | 0.44 s | 0.44 s |
+| total | 0.86 s | 0.6 s |
+
+Cold start is dominated by reading 2.3 GB of weights; the int8 backbone
+(543 MB) starts in about a third of the time. Saving the ORT-optimised graph
+does not help (0.38 s → 0.33 s for session creation), see `roadmap.md`.
+
+## Memory
+
+The hidden state of one batch is `padded_tokens × 4 KiB`; unfused attention
+additionally materialises `batch × 16 × seq² × 4 bytes` per layer (4 GiB for
+a single 8192-token text). `encode(..., max_batch_tokens=16384)` (default)
+bounds the padded tokens per batch, so mixed inputs are safe; lower it for
+long documents on small machines.

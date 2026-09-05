@@ -15,7 +15,7 @@ from scratch: the XLM-RoBERTa tokenizer (SentencePiece unigram model, the
 `nmt_nfkc` precompiled charsmap, Unicode grapheme segmentation), the torch-free
 loader for the sparse / ColBERT heads, the model downloader and the pooling.
 
-Platforms: Apple Silicon, Linux ARM64, Linux x86_64 (Python 3.11+).
+Platforms: Apple Silicon, Linux ARM64, Linux x86_64, Windows x86_64 (Python 3.11+).
 
 ## Install
 
@@ -42,9 +42,18 @@ out["colbert_vecs"][0].shape  # (7, 1024)
 embedder.convert_id_to_token(out["lexical_weights"][0])
 embedder.compute_lexical_matching_score(lw_query, lw_passage)
 embedder.colbert_score(q_vecs, p_vecs)
+
+# retrieval helpers: queries default to 512 tokens, passages to max_length (8192)
+q = embedder.encode_queries(["What is BGE M3?"])
+p = embedder.encode_corpus(["BGE M3 is a multilingual embedding model ..."])
+embedder.compute_score([("What is BGE M3?", "BGE M3 is ...")])
+# {'colbert': [...], 'sparse': [...], 'dense': [...], 'sparse+dense': [...], 'colbert+sparse+dense': [...]}
 ```
 
 Passing a single string returns unwrapped values, like FlagEmbedding.
+Batches are bounded by `batch_size` texts **and** `max_batch_tokens` padded
+tokens (default 16384), so mixing short and 8192-token inputs stays within
+memory.
 `BGEM3Embedder(precision="int8")` loads a 4× smaller quantised backbone
 (see `docs/quantization.md` for the accuracy trade-off).
 
@@ -74,4 +83,5 @@ See `AGENTS.md` and `docs/` (architecture, tokenizer, verification, development)
 
 ## Status
 
-v0.0.2: fp32 with exact parity with FlagEmbedding, plus an opt-in int8 backbone.
+v0.1.0: fp32 with exact parity with FlagEmbedding, opt-in int8 backbone,
+retrieval helpers, token-budget batching, Windows. Plan: `docs/roadmap.md`.

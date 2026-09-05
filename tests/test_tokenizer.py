@@ -61,3 +61,34 @@ def test_max_length_validation(tokenizer):
     with pytest.raises(ValueError):
         tokenizer.encode("x", max_length=1)
     assert tokenizer.encode("hello there", max_length=2) == [0, 2]
+
+
+def test_vocab_cache_roundtrip(tokenizer_path, tmp_path):
+    import shutil
+
+    model = tmp_path / "spm.model"
+    shutil.copy(tokenizer_path, model)
+    cache = tmp_path / "spm.model.cache"
+    parsed = SentencePieceModel.from_file(model, cache=False)
+    assert not cache.exists()
+    first = SentencePieceModel.from_file(model)
+    assert cache.is_file()
+    second = SentencePieceModel.from_file(model)
+    for m in (first, second):
+        assert m.pieces == parsed.pieces
+        assert m.scores == parsed.scores
+        assert m.types == parsed.types
+        assert m.unk_id == parsed.unk_id
+        assert m.charsmap is not None and parsed.charsmap is not None
+        assert m.charsmap.blob == parsed.charsmap.blob
+    # a stale or corrupt cache is ignored and rewritten
+    cache.write_bytes(b"garbage")
+    assert SentencePieceModel.from_file(model).pieces == parsed.pieces
+    assert cache.read_bytes() != b"garbage"
+    # a cache written for another model file (different digest) is not used
+    head, body = cache.read_bytes().split(b"\n\n", 1)
+    lines = head.split(b"\n")
+    lines[1] = b"0" * 64
+    lines[2] = b"1"  # would change unk_id if the stale cache were trusted
+    cache.write_bytes(b"\n".join(lines) + b"\n\n" + body)
+    assert SentencePieceModel.from_file(model).unk_id == parsed.unk_id
