@@ -50,6 +50,8 @@ class QuantConfig:
     quantize_embeddings: bool = True  # also quantise the word-embedding Gather
     smooth_alpha: float | None = 0.5  # SmoothQuant strength, None = off
     calibration_max_length: int = 512
+    reduce_range: bool = False  # 7-bit weights: avoids u8s8 saturation on AVX2
+    weight_uint8: bool = False  # u8u8 GEMM instead of u8s8
 
 
 def load_calibration_texts(path: str | Path = CALIBRATION_FILE) -> list[str]:
@@ -108,7 +110,8 @@ def quantize(
             str(model_out),
             op_types_to_quantize=ops,
             per_channel=True,
-            weight_type=QuantType.QInt8,
+            reduce_range=config.reduce_range,
+            weight_type=QuantType.QUInt8 if config.weight_uint8 else QuantType.QInt8,
             use_external_data_format=False,
             extra_options={"DefaultTensorType": onnx.TensorProto.FLOAT},
         )

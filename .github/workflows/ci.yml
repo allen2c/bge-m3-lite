@@ -10,6 +10,10 @@ on:
         description: "run full-model tests (downloads 2.3 GB)"
         type: boolean
         default: false
+      quantize_variants:
+        description: "bench: '|'-separated extra args for `bge-m3-lite quantize`, one build per entry"
+        type: string
+        default: ""
 
 jobs:
   test:
@@ -61,6 +65,16 @@ jobs:
           python-version: "3.12"
       - run: uv sync --group dev --group quant
       - run: uv run bge-m3-lite --quiet download
-      - run: uv run bge-m3-lite --quiet quantize
-      - run: uv run python -c "import platform; print(platform.machine(), platform.processor())"; lscpu 2>/dev/null | grep -i -E "model name|flags" | cut -c1-200 || true
+      - run: uv run python -c "from bge_m3_lite import hub; hub.ensure_files((hub.INT8_FILE,), quiet=True)"
+      - run: uv run python -c "import platform; print(platform.machine(), platform.processor())"; lscpu 2>/dev/null | grep -i -E "model name|flags" | cut -c1-400 || true
       - run: uv run tools/eval_model.py ~/.cache/bge-m3-lite/BAAI--bge-m3/model.onnx ~/.cache/bge-m3-lite/BAAI--bge-m3/model_fused.onnx ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx
+      - name: quantize variants
+        if: ${{ inputs.quantize_variants != '' }}
+        shell: bash
+        run: |
+          IFS='|' read -ra variants <<< "${{ inputs.quantize_variants }}"
+          for v in "${variants[@]}"; do
+            echo "##### quantize $v"
+            uv run bge-m3-lite --quiet quantize --output /tmp/variant.onnx $v
+            uv run tools/eval_model.py /tmp/variant.onnx
+          done
