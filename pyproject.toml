@@ -27,7 +27,7 @@ classifiers = [
 ]
 dependencies = [ "onnxruntime>=1.17" ]
 optional-dependencies.quant = [ "onnx>=1.16", "onnx-ir", "sympy" ]
-urls.Homepage = "https://github.com/allenchou/bge-m3-lite"
+urls.Homepage = "https://github.com/allen2c/bge-m3-lite"
 scripts.bge-m3-lite = "bge_m3_lite.cli:main"
 
 [dependency-groups]

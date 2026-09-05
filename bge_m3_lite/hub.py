@@ -75,7 +75,7 @@ ALL_FILES = TOKENIZER_FILES + HEAD_FILES + MODEL_FILES
 # int8 backbone (dynamic per-channel quantisation of MatMul + Gather, built by
 # ``bge-m3-lite quantize``). Hosted as a GitHub release asset; override the URL
 # with BGE_M3_LITE_INT8_URL or build it locally into the cache.
-INT8_RELEASE = "https://github.com/allenchou/bge-m3-lite/releases/download/v0.0.2"
+INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.0.2"
 INT8_FILE = RemoteFile(
     "model_int8.onnx",
     f"{INT8_RELEASE}/model_int8.onnx",
