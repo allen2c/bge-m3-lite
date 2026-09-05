@@ -52,7 +52,7 @@ class QuantConfig:
     calibration_max_length: int = 512
     rowwise_zero_point: bool = True  # uint8 activations with a per-row zero point
     reduce_range: bool = False  # 7-bit weights: avoids u8s8 saturation on AVX2
-    weight_uint8: bool = False  # u8u8 GEMM instead of u8s8
+    weight_uint8: bool = True  # u8u8 GEMM: u8s8 saturates int16 on AVX2 (VPMADDUBSW)
 
 
 def load_calibration_texts(path: str | Path = CALIBRATION_FILE) -> list[str]:

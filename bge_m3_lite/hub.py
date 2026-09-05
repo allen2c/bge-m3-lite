@@ -81,8 +81,8 @@ INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.3.1"
 INT8_FILE = RemoteFile(
     "model_int8.onnx",
     f"{INT8_RELEASE}/model_int8.onnx",
-    596905791,
-    "25344e70ef7b9433de1d565e105971131b97c7a4e1f01c05c81aaf5395a4ce6b",
+    597151197,
+    "d87b5cc0b0953c5336eebe3bce99cf3c55683edb9fe321fa6fdec73425d864e4",
 )
 
 # Fused fp32 backbone (Attention / SkipLayerNorm / BiasGelu contrib ops, built by

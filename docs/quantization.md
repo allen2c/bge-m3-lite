@@ -20,7 +20,10 @@ extra):
    that every platform computes the same thing: per token `scale = (max − min)
    / 255`, zero point, `MatMulInteger` (u8 × s8), and the zero-point
    correction `s · (Q·Wq − z · colsum(Wq))`. Weights are per-column symmetric
-   int8. The merged QKV `Attention` becomes the same quantised projection +
+   int8, stored as uint8 with a zero point of 128 (`MatMulInteger` removes it):
+   MLAS's AVX2 u8·s8 kernel saturates its int16 intermediates (`VPMADDUBSW`),
+   u8·u8 does not, and the integer results are otherwise identical. The merged
+   QKV `Attention` becomes the same quantised projection +
    `MultiHeadAttention`; the word embeddings are int8 rows with one scale per
    row (lossless in practice).
 
@@ -31,6 +34,7 @@ Single file `model_int8.onnx`, 569 MiB (fp32: 2.27 GB). Deterministic build;
 pip install "bge-m3-lite[quant]"       # onnx, onnx-ir, sympy (build time only)
 bge-m3-lite quantize                    # writes model_int8.onnx into the cache
 bge-m3-lite quantize --alpha 0.65       # other SmoothQuant strengths
+bge-m3-lite quantize --weights s8       # u8·s8 GEMM: only correct on VNNI / ARM CPUs
 bge-m3-lite quantize --method dynamic   # ORT's per-tensor quantize_dynamic (v0.0.2/v0.3.0 style)
 bge-m3-lite encode --int8 "text"
 ```

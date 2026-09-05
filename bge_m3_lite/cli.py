@@ -49,7 +49,7 @@ def _cmd_quantize(args: argparse.Namespace) -> int:
         smooth_alpha=None if args.no_smooth else args.alpha,
         rowwise_zero_point=not args.symmetric,
         reduce_range=args.reduce_range,
-        weight_uint8=args.u8u8,
+        weight_uint8=args.weights == "u8",
     )
     texts = load_calibration_texts(args.calibration) if args.calibration else None
     tokenizer = hub.ensure_files(hub.TOKENIZER_FILES, args.cache_dir, quiet=True)
@@ -187,7 +187,12 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument(
         "--reduce-range", action="store_true", help="7-bit weights (AVX2 safe)"
     )
-    q.add_argument("--u8u8", action="store_true", help="uint8 weights (u8u8 GEMM)")
+    q.add_argument(
+        "--weights",
+        choices=["u8", "s8"],
+        default="u8",
+        help="weight storage: u8 (safe everywhere) or s8 (saturates on AVX2)",
+    )
     q.add_argument(
         "--calibration", type=Path, default=None, help="one text per line (utf-8)"
     )

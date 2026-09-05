@@ -48,14 +48,15 @@ step is gated by the fixtures in `tests/fixtures/` staying green.
   matrix before pinning an asset.**
 - v0.3.1 makes the per-row scheme explicit in the graph (`--method rowwise`,
   uint8 activations with a per-row zero point, `MatMulInteger`, QKV via
-  `MultiHeadAttention`), plus SmoothQuant α 0.5. Dense cosine 0.9988, sparse
+  `MultiHeadAttention`, uint8 weights because the AVX2 u8·s8 kernel saturates
+  its int16 intermediates), plus SmoothQuant α 0.5. Dense cosine 0.9988, sparse
   top-5 10–11/11, ColBERT p5 0.99 on x86, ARM and macOS alike; 1.5× (x86
   VNNI) to 3.5× (ARM) faster than fp32, 20–30 % slower than the per-tensor
   kernels. Details and the discarded variants: `quantization.md`.
 - Also: the fused graph declares the `com.microsoft` opset (onnx tooling
   needs it), `quantize` gained `--method/--alpha/--calibration/--symmetric/
-  --reduce-range/--u8u8`, and the CI `bench` job accepts a `quantize_variants`
-  matrix.
+  --weights/--reduce-range`, and the CI `bench` job accepts a
+  `quantize_variants` matrix.
 
 ## Later
 

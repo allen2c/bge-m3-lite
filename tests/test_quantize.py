@@ -78,13 +78,16 @@ def test_cli_quantize_smooth_flags():
 
     args = build_parser().parse_args(["quantize"])
     assert args.method == "rowwise" and args.alpha == 0.5 and not args.no_smooth
-    assert not args.symmetric
+    assert not args.symmetric and args.weights == "u8"
     args = build_parser().parse_args(["quantize", "--method", "dynamic", "--no-smooth"])
     assert args.method == "dynamic" and args.no_smooth
 
 
-@pytest.mark.parametrize("zero_point", [False, True])
-@pytest.mark.parametrize("weight_uint8", [False, True])
+# u8 activations with s8 weights are left out: MLAS's AVX2 u8s8 kernel saturates
+# its int16 intermediates (VPMADDUBSW) and the test fails on such CPUs.
+@pytest.mark.parametrize(
+    ("zero_point", "weight_uint8"), [(False, False), (False, True), (True, True)]
+)
 def test_rowwise_matmul_and_attention(zero_point, weight_uint8):
     onnx = pytest.importorskip("onnx")
     import numpy as np
