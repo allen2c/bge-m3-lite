@@ -84,7 +84,8 @@ def test_cli_quantize_smooth_flags():
 
 
 @pytest.mark.parametrize("zero_point", [False, True])
-def test_rowwise_matmul_and_attention(zero_point):
+@pytest.mark.parametrize("weight_uint8", [False, True])
+def test_rowwise_matmul_and_attention(zero_point, weight_uint8):
     onnx = pytest.importorskip("onnx")
     import numpy as np
     import onnxruntime as ort
@@ -139,7 +140,12 @@ def test_rowwise_matmul_and_attention(zero_point):
     ref = np.asarray(
         ort.InferenceSession(model.SerializeToString()).run(None, feeds)[0]
     )
-    _quantize_rowwise(model, quantize_embeddings=True, zero_point=zero_point)
+    _quantize_rowwise(
+        model,
+        quantize_embeddings=True,
+        zero_point=zero_point,
+        weight_uint8=weight_uint8,
+    )
     ops = {n.op_type for n in model.graph.node}
     assert "MatMulInteger" in ops and "MultiHeadAttention" in ops
     assert "Attention" not in ops and "MatMul" not in ops

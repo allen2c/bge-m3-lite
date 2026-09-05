@@ -113,6 +113,7 @@ def quantize(
             quantize_embeddings=config.quantize_embeddings,
             zero_point=config.rowwise_zero_point,
             reduce_range=config.reduce_range,
+            weight_uint8=config.weight_uint8,
         )
         onnx.save_model(model, str(model_out))
     elif config.method == "dynamic":
@@ -278,6 +279,7 @@ def _quantize_rowwise(
     quantize_embeddings: bool,
     zero_point: bool = False,
     reduce_range: bool = False,
+    weight_uint8: bool = False,
 ) -> None:
     import onnx
     from onnx import helper, numpy_helper
@@ -291,8 +293,9 @@ def _quantize_rowwise(
         consts.append(numpy_helper.from_array(value, name))
         return name
 
-    c_i8max = const("rowwise/i8max", np.array(_QI8_MAX, dtype=np.float32))
-    c_u8max = const("rowwise/u8max", np.array(255.0, dtype=np.float32))
+    c_qmax = const(
+        "rowwise/qmax", np.array(255.0 if zero_point else _QI8_MAX, dtype=np.float32)
+    )
     c_eps = const("rowwise/eps", np.array(1e-10, dtype=np.float32))
     c_zero = const("rowwise/zero", np.array(0.0, dtype=np.float32))
     c_slice0 = const("rowwise/s0", np.array([0], dtype=np.int64))
@@ -305,7 +308,25 @@ def _quantize_rowwise(
         w_max = 63.0 if reduce_range else _QI8_MAX  # 7-bit: no u8s8 AVX2 overflow
         w_scale = np.maximum(np.abs(w).max(axis=0) / w_max, 1e-12)
         w_q = np.clip(np.round(w / w_scale), -w_max, w_max).astype(np.int8)
-        inits[w_name].CopyFrom(numpy_helper.from_array(w_q, w_name))
+        mm_inputs = [f"{prefix}/xq", w_name]
+        if weight_uint8:
+            # u8·u8 GEMM: same integers, but no int16 saturation on AVX2
+            # (u8·s8 there goes through VPMADDUBSW). The zero point of 128 is
+            # removed by MatMulInteger itself (per-column b_zero_point).
+            inits[w_name].CopyFrom(
+                numpy_helper.from_array(
+                    (w_q.astype(np.int16) + 128).astype(np.uint8), w_name
+                )
+            )
+            mm_inputs += [
+                const(
+                    f"{prefix}/a_zp",
+                    np.array(0, dtype=np.uint8 if zero_point else np.int8),
+                ),
+                const(f"{prefix}/b_zp", np.full((n,), 128, dtype=np.uint8)),
+            ]
+        else:
+            inits[w_name].CopyFrom(numpy_helper.from_array(w_q, w_name))
         ws = const(f"{prefix}/w_scale", w_scale.astype(np.float32).reshape(1, n))
         shp = const(f"{prefix}/shape2d", np.array([-1, k], dtype=np.int64))
         n_const = const(f"{prefix}/n", np.array([n], dtype=np.int64))
@@ -327,7 +348,7 @@ def _quantize_rowwise(
                 mk("Min", [f"{p}/mn0", c_zero], [f"{p}/mn"]),  # range must hold 0
                 mk("Max", [f"{p}/mx", c_zero], [f"{p}/mx0"]),
                 mk("Sub", [f"{p}/mx0", f"{p}/mn"], [f"{p}/range"]),
-                mk("Div", [f"{p}/range", c_u8max], [f"{p}/scale0"]),
+                mk("Div", [f"{p}/range", c_qmax], [f"{p}/scale0"]),
                 mk("Max", [f"{p}/scale0", c_eps], [f"{p}/scale"]),
                 mk("Div", [f"{p}/mn", f"{p}/scale"], [f"{p}/negzp"]),
                 mk("Neg", [f"{p}/negzp"], [f"{p}/zp0"]),
@@ -335,9 +356,9 @@ def _quantize_rowwise(
                 mk("Div", [f"{p}/x2d", f"{p}/scale"], [f"{p}/xs"]),
                 mk("Round", [f"{p}/xs"], [f"{p}/xr"]),
                 mk("Add", [f"{p}/xr", f"{p}/zp"], [f"{p}/xz"]),
-                mk("Clip", [f"{p}/xz", c_zero, c_u8max], [f"{p}/xc"]),
+                mk("Clip", [f"{p}/xz", c_zero, c_qmax], [f"{p}/xc"]),
                 mk("Cast", [f"{p}/xc"], [f"{p}/xq"], to=onnx.TensorProto.UINT8),
-                mk("MatMulInteger", [f"{p}/xq", w_name], [f"{p}/y32"]),
+                mk("MatMulInteger", mm_inputs, [f"{p}/y32"]),
                 mk("Cast", [f"{p}/y32"], [f"{p}/yf"], to=onnx.TensorProto.FLOAT),
                 mk("Mul", [f"{p}/zp", colsum], [f"{p}/corr"]),
                 mk("Sub", [f"{p}/yf", f"{p}/corr"], [f"{p}/yc"]),
@@ -347,12 +368,12 @@ def _quantize_rowwise(
             nodes += [
                 mk("Abs", [f"{p}/x2d"], [f"{p}/abs"]),
                 mk("ReduceMax", [f"{p}/abs"], [f"{p}/amax"], axes=[1], keepdims=1),
-                mk("Div", [f"{p}/amax", c_i8max], [f"{p}/scale0"]),
+                mk("Div", [f"{p}/amax", c_qmax], [f"{p}/scale0"]),
                 mk("Max", [f"{p}/scale0", c_eps], [f"{p}/scale"]),
                 mk("Div", [f"{p}/x2d", f"{p}/scale"], [f"{p}/xs"]),
                 mk("Round", [f"{p}/xs"], [f"{p}/xr"]),  # |xr| <= 127 by construction
                 mk("Cast", [f"{p}/xr"], [f"{p}/xq"], to=onnx.TensorProto.INT8),
-                mk("MatMulInteger", [f"{p}/xq", w_name], [f"{p}/y32"]),
+                mk("MatMulInteger", mm_inputs, [f"{p}/y32"]),
                 mk("Cast", [f"{p}/y32"], [f"{p}/yf"], to=onnx.TensorProto.FLOAT),
                 mk("Mul", [f"{p}/yf", f"{p}/scale"], [f"{p}/ys"]),
             ]
