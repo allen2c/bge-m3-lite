@@ -39,14 +39,18 @@ docker run --rm --platform linux/arm64 -v $PWD:/src:ro python:3.12-slim sh -c \
    git tag -a v0.0.1 -m "v0.0.1"
    git push origin main --tags
    ```
-4. Build and publish (token from https://pypi.org/manage/account/token/):
-   ```bash
-   rm -rf dist && uv build
-   uv publish --token pypi-...            # or: UV_PUBLISH_TOKEN=... uv publish
-   uv publish --index testpypi ...        # optional dry run on TestPyPI first
-   ```
-   Model files are not part of the wheel; they are pinned by revision + SHA-256
-   in `hub.py`.
+4. Pushing the tag runs `.github/workflows/release.yml`: checks, build, then
+   publish to PyPI via trusted publishing and attach the wheel to a GitHub
+   release. One-time setup:
+   - PyPI → your account → *Publishing* → add a pending publisher:
+     project `bge-m3-lite`, owner/repo of this repository, workflow
+     `release.yml`, environment `pypi`.
+   - GitHub repo → Settings → Environments → create `pypi` (optionally require
+     reviewers).
+   Manual fallback: `uv build && uv publish --token pypi-...`.
+5. Upload `model_int8.onnx` to the same release (see *Release assets*).
+   Model files are never part of the wheel; they are pinned by revision +
+   SHA-256 in `hub.py`.
 
 ## Release assets
 
