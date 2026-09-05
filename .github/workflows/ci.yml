@@ -16,10 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: macos-latest, arch: arm64 }        # Apple Silicon
-          - { os: ubuntu-latest, arch: x86_64 }     # Linux x86_64
-          - { os: ubuntu-24.04-arm, arch: aarch64 } # Linux ARM64
+        os: [macos-latest, ubuntu-latest, ubuntu-24.04-arm]  # arm64 / x86_64 / aarch64
         python: ["3.11", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
