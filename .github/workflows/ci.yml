@@ -18,6 +18,14 @@ on:
         description: "bench: also build the fused fp32 graph from the checked-out code and evaluate it"
         type: boolean
         default: false
+      env_variants:
+        description: "bench: '|'-separated env settings (e.g. BGE_M3_LITE_THREADS=4 BGE_M3_LITE_SPIN=1), fused + int8 evaluated under each"
+        type: string
+        default: ""
+      bench_os:
+        description: "bench: JSON list of runners"
+        type: string
+        default: '["ubuntu-latest", "ubuntu-24.04-arm", "macos-latest"]'
 
 jobs:
   test:
@@ -60,7 +68,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+        os: ${{ fromJSON(inputs.bench_os) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -97,6 +105,19 @@ jobs:
           echo "##### fuse (local build)" | tee -a "$RUNNER_TEMP/eval.log"
           uv run --project "$GITHUB_WORKSPACE" bge-m3-lite --quiet fuse --output local
           uv run --project "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/eval_model.py" local/model_fused.onnx | tee -a "$RUNNER_TEMP/eval.log"
+      - name: env variants
+        if: ${{ inputs.env_variants != '' }}
+        shell: bash
+        run: |
+          cd ~/.cache/bge-m3-lite/BAAI--bge-m3
+          IFS='|' read -ra variants <<< "${{ inputs.env_variants }}"
+          for v in "${variants[@]}"; do
+            for m in model_fused.onnx model_int8.onnx; do
+              [ -f "$m" ] || continue
+              echo "##### $m $v" | tee -a "$RUNNER_TEMP/eval.log"
+              env $v uv run --project "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/eval_model.py" "$m" | tee -a "$RUNNER_TEMP/eval.log"
+            done
+          done
       - name: quantize variants
         if: ${{ inputs.quantize_variants != '' }}
         shell: bash
