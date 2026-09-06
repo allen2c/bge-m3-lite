@@ -447,7 +447,9 @@ def test_layer_tail_row_loop_is_exact(b, s, chunk):
     """The per-token tail of a layer runs in a scan-output ``Loop`` over
     ``chunk`` rows of the flattened batch (14 rows with chunk 3/4: 5/4
     windows, the last one shifted back; 12 rows with chunk 4: exact fit; 5
-    rows with chunk 64: one window) and the output is bit-identical."""
+    rows with chunk 64: one window). Bit-identical on Apple Silicon; x86 MLAS
+    picks its GEMM kernel by row count, so the rows recomputed in the shifted
+    window can differ in the last bit."""
     onnx = pytest.importorskip("onnx")
     import numpy as np
     import onnxruntime as ort
@@ -480,7 +482,7 @@ def test_layer_tail_row_loop_is_exact(b, s, chunk):
     out = np.asarray(
         ort.InferenceSession(model.SerializeToString()).run(None, feeds)[0]
     )
-    assert np.array_equal(out, ref)
+    np.testing.assert_allclose(out, ref, rtol=1e-5, atol=1e-6)
 
 
 @pytest.mark.parametrize("chunk", [3, 4, 64])

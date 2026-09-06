@@ -85,8 +85,11 @@ output*: onnxruntime writes each window into one buffer, no `Concat`
 accumulator, no copy out of the loop. Scan outputs need one shape per
 iteration, so the last window is shifted back to 256 full rows (up to 255
 rows recomputed) and the outer graph reassembles the rows with two `Slice`
-and a `Concat`. Outputs are bit-identical (fixtures, held-out set, fp32 and
-int8; the int8 weight file is unchanged since v0.5.0).
+and a `Concat`. Outputs are bit-identical on the M4 (fixtures, held-out
+set, fp32 and int8; the int8 weight file is unchanged since v0.5.0); on x86
+MLAS picks its GEMM kernel by row count, so the rows recomputed in the
+shifted window can differ in the last bit (fixtures exact at 1e-4 on every
+runner, `verification.md`).
 
 | tokens × texts, M4, one `encode`, peak − RSS after load | fp32 v0.5.2 | fp32 v0.6.1 | int8 v0.5.2 | int8 v0.6.1 |
 |---|---|---|---|---|
