@@ -69,12 +69,12 @@ weight, so the weights are served from the mmapped `.onnx_data` files
 
 The weight pages then show up in RSS once touched (fp32: 1.3 GB, int8:
 450 MiB) but they are file-backed: shared between processes through the page
-cache (two processes at 1.3 GB RSS each added 0.5 MB of file-backed pages to
-the system) and reclaimable under pressure. Batch throughput is unchanged
-because packing is amortised; every *short* query packs B again, hence 2×
-the latency and CPU. Right for serverless, one-shot CLI calls and many
+cache (two processes at 1.3 GB RSS each added 0.5 MB of file-backed pages)
+and reclaimable under pressure. Batch throughput is nearly unchanged because
+packing is amortised; every *short* query packs B again, hence 1.5–4× the
+latency and CPU. Right for serverless, one-shot CLI calls and many
 one-thread workers on one machine; wrong for a resident service answering
-single queries.
+single queries. Same picture on the CI runners (table below).
 
 Not done: disabling the arena. It does not return memory after a long
 request (RSS after a 4096-token text stays at 903 MiB int8 / 1778 fp32
@@ -90,6 +90,9 @@ versus 704 / 1614 with the arena) and makes nothing faster.
 | | int8 | 1.84 s | 416 / 920 MiB | 1100 | 3.21 | 26 / 59 ms | 0 |
 | Apple M1 VM (3 vCPU, 3 threads) | fp32 fused | 4.6 s | 1279 / 1631 MiB | 232 | 11.2 | 65 / 142 ms | 0 |
 | | int8 | 1.35 s | 419 / 718 MiB | 581 | 4.54 | 44 / 86 ms | 0 |
+| EPYC 7763 (v0.5.1 run) | fp32 / int8 | 0.84 / 1.72 s | 1271 / 417 MiB | 265 / 378 | 14.8 / 10.2 | 47 / 39 ms wall | 0 |
+| EPYC, Neoverse, M1 VM | fp32 **low_memory** | 0.19–0.23 s | 119–144 MiB | 245 / 308 / 332 (−1–9 %) | | 91 / 72 / 78 ms (1.7–1.9×) | 0 |
+| | int8 **low_memory** | 1.3–1.6 s | 127–139 MiB | 360 / 1054 / 485 (−5 % on Linux) | | 58 / 42 / 85 ms (1.5–4×) | 0 |
 
 `os-threads` in the log confirms onnxruntime's default of physical cores: the
 SMT Xeon runner starts two fewer workers than the ARM one. The raw export
