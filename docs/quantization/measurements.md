@@ -46,6 +46,12 @@ The v4 recipe is 0.86× fp32 on VNNI where v3 was 1.5× (742 tok/s):
 `MatMulIntegerToFloat` with u8·u8 operands has no VNNI kernel path that
 `MatMulInteger` + `Cast` + `Mul` (v3) had. Open item in `../roadmap/next.md`.
 
+**v0.5.2 int8 (chunk 256, built on each runner, 2026-09-06):** EPYC 7763 381
+tok/s (dense 0.9982 / 0.9971, sparse 9/11, 29/40), Neoverse-N2 1121 (0.9981 /
+0.9978, 7/11, 29/40), macOS VM 924 (0.9981 / 0.9978, 8/11, 24/40; that runner
+also ran fp32 at 362–377, so it was a faster VM than in the v0.4 rows): same
+accuracy and throughput as v0.4/v0.5.
+
 **int8 kernel variants on the EPYC runners (2026-09-06, v0.5.2 branch, 128-tok
 tok/s; the Xeon was not drawn in three tries):** v4 recipe 384 (7763) / 342
 (9V74), `--matmul-integer` (v3 kernel path) 374 / 340, `--signed-weights`
