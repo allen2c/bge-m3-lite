@@ -2,7 +2,8 @@
 
 Usage:  uv run tools/bench_serving.py [--precision fp32|int8] [--model PATH]
                                       [--concurrency 1,2,4,8] [--sessions 4]
-                                      [--queries 40] [--passages 16] [--repeat 2]
+                                      [--queries 40] [--passages 16 --passage-tokens 128]
+                                      [--batch-window-ms 10] [--repeat 2]
 
 Prints one Markdown table per precision (the CI `bench` job appends it to the
 step summary) with, per mode: requests per second, p50 / p95 latency seen by a
@@ -11,9 +12,12 @@ client, CPU-seconds per request, the worst event-loop stall while requests run
 main thread; `asyncio.to_thread(emb.encode, q)` at each concurrency, with a
 closed loop of that many clients (a client sends its next request as soon as
 the previous one returns, like `wrk`); `encode(list)` in batches of several
-sizes (what a micro-batcher would submit: every request waits for the whole
-batch); the same for 128-token passages; and, with `--sessions N`, N sessions
-of ``threads / N`` intra-op threads each, one client per session.
+sizes (every request waits for the whole batch); `AsyncEmbedder` with its
+default `max_concurrency`, batching off and with the window (docs/serving.md);
+the same for passages (`--passage-tokens`, the 128 default is the 158-token
+text of `eval_model.py`); and, with `--sessions N`, N sessions of
+``threads / N`` intra-op threads each, one client per session. Peak RSS is
+cumulative (`ru_maxrss`), so run one shape per process to isolate it.
 """
 
 from __future__ import annotations

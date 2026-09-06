@@ -210,7 +210,9 @@ class AsyncEmbedder:
                 self._flush(pending)
 
     async def _enqueue(self, texts: str | Sequence[str], options: _Options) -> Any:
-        """Park the request until the batch window closes or the batch is full."""
+        """Join the pending group for these options; it leaves on the next loop
+        iteration when a slot is free, when it is full, or when a slot frees
+        (at most the window later)."""
         single = isinstance(texts, str)
         items = [texts] if single else list(texts)
         loop = asyncio.get_running_loop()
