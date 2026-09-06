@@ -27,7 +27,19 @@ Shipped versions and the facts behind them: `done.md`.
   layout (the loop costs memory there). The arena high-water mark, not the
   live set, is what `max_batch_tokens` buys; `kSameAsRequested` and
   shrinkage were measured and rejected.
-- **v0.6 (candidates)** — weight-only int8 `MatMulNBits` for Apple Silicon
+- **v0.6 candidate: asyncio serving** (first numbers, M4, load average 3.5 so
+  re-measure alone; `tools/` has no script yet): `session.run` releases the
+  GIL (a Python spinner keeps 79–93 % of its rate while `encode` runs), the
+  tokenizer costs 0.03 ms per query, so `await asyncio.to_thread(emb.encode,
+  q)` on one shared embedder is the natural pattern. One session × 4 threads,
+  short queries: fp32 43 req/s sequential → 65 at concurrency 8 (p50 24 →
+  118 ms), one `encode(list)` of 40 = 104 req/s; int8 58 → 152 req/s at
+  concurrency 8 (p50 18 → 50 ms), while its `encode(list)` is only 66.
+  Four 1-thread sessions are worse than one 4-thread session (fp32 52 vs 62
+  req/s, int8 89 vs 117; with `low_memory` 18 / 45). Open: peak memory under
+  concurrency (each in-flight run has its own activations), an `encode_async`
+  / micro-batching helper (stdlib only), and CI-runner numbers.
+- **v0.6 (other candidates)** — weight-only int8 `MatMulNBits` for Apple Silicon
   (memory only; int8 GEMM is slower than SGEMM there); embeddings served from
   the mmapped file instead of the int8 `Gather` copy; sparse-head rounding
   experiments with the held-out set.
