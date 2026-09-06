@@ -9,8 +9,10 @@
   build-time ONNX tooling in the `quant` extra, torch/transformers in `ref`.
 - Flat layout (`bge_m3_lite/`, `tests/`, `tools/`, `docs/`), no `src/`.
 - fp32 outputs must match FlagEmbedding: `tests/fixtures/` is the contract.
-- Verify claims empirically (CI `bench` matrix for anything platform-specific)
-  and record the numbers in `docs/`; do not rely on memory.
+- Verify claims empirically (CI `bench` matrix for anything platform-specific;
+  the development Mac is not representative) and record the numbers in
+  `docs/`; do not rely on memory. Benchmark with nothing else running.
+- Docs stay under 100 lines each (150 max); split into folders instead.
 
 ## Commands
 
@@ -23,14 +25,16 @@ BGE_M3_LITE_RUN_SLOW=1 uv run pytest -m slow    # full model, 2.3 GB cache
 
 ## Docs (`docs/`)
 
-| file | read it for |
+| path | read it for |
 |---|---|
 | `architecture.md` | modules, data flow, model files, cache |
 | `tokenizer.md` | the from-scratch XLM-R tokenizer |
 | `fusion.md` | fused fp32 graph: what ships, how it is built |
-| `quantization.md` | int8 backbone: recipe, platform findings, measurements |
-| `calibration.md` | calibration texts (sources, licence) and the held-out evaluation set |
-| `memory.md` | attention in query chunks: why long inputs no longer need 4 GiB |
+| `quantization/recipe.md` | int8 backbone: SmoothQuant + row-wise scheme, variants |
+| `quantization/measurements.md` | int8 accuracy and speed per platform |
+| `calibration.md` | calibration texts (sources, licence), held-out evaluation set |
+| `memory.md` | attention in query chunks: long inputs without 4 GiB |
 | `verification.md` | accuracy, platforms, throughput, start-up, memory |
-| `development.md` | fixtures, CI, release and asset upload |
-| `roadmap.md` | what was done, why, and what is left |
+| `development.md` | fixtures, CI bench inputs, release and asset upload |
+| `roadmap/done.md` | shipped versions and the facts behind them |
+| `roadmap/next.md` | planned versions (v0.5: resource efficiency) |

@@ -4,17 +4,19 @@ Requires the optional ``quant`` extra (``pip install "bge-m3-lite[quant]"``);
 ``onnx`` is only imported inside :func:`quantize`, never at runtime. Methods:
 
 * ``rowwise`` (default, shipped): SmoothQuant, then per-token uint8
-  activations with a zero point and per-column int8 weights, written out with
-  standard ops (``MatMulInteger``) so every CPU computes the same thing.
+  activations with a zero point and per-column int8 weights (per-axis
+  ``QuantizeLinear`` + ``MatMulIntegerToFloat``), and attention in query
+  chunks, so every CPU computes the same thing within a bounded buffer.
 * ``dynamic``: ORT ``quantize_dynamic`` (per-tensor activations). Faster
-  kernels, but its accuracy depends on the platform (see docs/quantization.md).
+  kernels, but its accuracy depends on the platform (see docs/quantization/).
 * ``nbits``: weight-only ``MatMulNBits`` (4 or 8 bit, block-wise scales).
 
 SmoothQuant (Xiao et al. 2022) moves the activation outliers of the LayerNorm
 outputs into the following weights: for ``Y = X W`` and a per-input-channel
 scale ``s``, ``Y = (X / s) (diag(s) W)``; ``s_k = max|X_k|^alpha /
-max|W_k|^(1 - alpha)`` with statistics from ``calibration.txt``. One ``Mul``
-per projection, weights rescaled in place, fp32 outputs unchanged.
+max|W_k|^(1 - alpha)`` with statistics from the calibration texts
+(docs/calibration.md). One ``Mul`` per projection, weights rescaled in place,
+fp32 outputs unchanged.
 """
 
 from __future__ import annotations
@@ -53,9 +55,8 @@ class QuantConfig:
     calibration_max_length: int = 512
     symmetric: bool = False  # rowwise: fixed zero point 128 instead of per-row
     attention_chunk: int = ATTENTION_CHUNK  # query rows per attention pass, 0 = off
-    keep_fp32: tuple[
-        str, ...
-    ] = ()  # regexes on node name: leave these MatMul/Attention fp32
+    # node-name regexes whose MatMul / Attention stay fp32 (experiments)
+    keep_fp32: tuple[str, ...] = ()
 
 
 def load_calibration_texts(path: str | Path | None = None) -> list[str]:

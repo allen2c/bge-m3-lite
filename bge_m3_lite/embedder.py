@@ -42,7 +42,7 @@ class BGEM3Embedder:
         query_max_length: int = QUERY_MAX_LENGTH,
         passage_max_length: int | None = None,
     ) -> None:
-        """``precision="int8"`` uses the quantised backbone (see docs/quantization.md);
+        """``precision="int8"`` uses the quantised backbone (see docs/quantization/);
         ``fused=False`` runs the raw Hub export instead of the fused fp32 graph
         (same outputs, slower; see docs/fusion.md);
         ``model_path`` points at any backbone ONNX file and skips the download.

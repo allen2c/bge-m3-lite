@@ -1,6 +1,6 @@
 # Calibration set
 
-SmoothQuant (`quantization.md`) needs per-channel activation statistics. They
+SmoothQuant (`quantization/recipe.md`) needs per-channel activation statistics. They
 come from two bundled files, loaded together by
 `quantize.load_calibration_texts()` (`--calibration FILE` replaces both):
 

@@ -38,7 +38,7 @@ on all three Linux/macOS runners.
 ## GitHub-hosted runners (`tools/eval_model.py`, 4 vCPU)
 
 v0.4.0 (chunked attention, int8 v4; the Xeon runner was not drawn, see
-`quantization.md` for accuracy):
+`quantization/measurements.md` for accuracy):
 
 | runner | CPU | fp32 fused 128-tok | int8 v4 128-tok | int8 speed-up |
 |---|---|---|---|---|
@@ -56,7 +56,7 @@ v0.3.1:
 | `macos-latest` (VM) | Apple Silicon, 3 cores | 127 tok/s | 319 tok/s | 2.5× |
 
 `ubuntu-latest` alternates between the two x86 CPUs; int8 accuracy is the same
-on every runner (`quantization.md`).
+on every runner (`quantization/measurements.md`).
 
 fp32 is exact on every runner (dense cosine 1.0, sparse and ColBERT identical).
 The macOS runner is a throttled VM; use the M4 numbers above for Apple Silicon.
@@ -72,7 +72,7 @@ The macOS runner is a throttled VM; use the M4 numbers above for Apple Silicon.
 
 Cold start is dominated by reading 2.3 GB of weights; the int8 backbone
 (569 MB) starts in about a third of the time. Saving the ORT-optimised graph
-does not help (0.38 s → 0.33 s for session creation), see `roadmap.md`.
+does not help (0.38 s → 0.33 s for session creation), see `roadmap/done.md`.
 
 ## Memory
 
@@ -87,4 +87,4 @@ mixed inputs are safe; lower it for long documents on small machines.
 `tests/fixtures/heldout_*` (40 texts, `calibration.md`) is evaluated by
 `tools/eval_model.py` next to the 11 FlagEmbedding texts; the fp32 fused
 graph reproduces its own reference exactly, the int8 numbers are in
-`quantization.md`.
+`quantization/measurements.md`.

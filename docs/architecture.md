@@ -36,7 +36,7 @@ Formulas follow `FlagEmbedding/inference/embedder/encoder_only/m3.py` and
 |---|---|---|
 | `onnx/model.onnx` + `model.onnx_data` + `Constant_7_attr__value` | 2.27 GB | official opset-11 export, outputs `token_embeddings`, `sentence_embedding` |
 | `model_fused.onnx` + `model_fused.onnx_data` (release assets) | 200 KB + 288 MB | fused graph with chunked attention (`fusion.md`, `memory.md`), shares `model.onnx_data` |
-| `model_int8.onnx` (release asset) | 569 MB | row-wise int8 backbone (`quantization.md`) |
+| `model_int8.onnx` (release asset) | 569 MB | row-wise int8 backbone (`quantization/`) |
 | `sentencepiece.bpe.model` | 5 MB | 250 000 pieces, unigram, `nmt_nfkc` precompiled charsmap |
 | `sentencepiece.bpe.model.cache` | 4 MB | written locally on first load: parsed vocabulary keyed by the model's SHA-256 (no pickle) |
 | `colbert_linear.pt` | 2 MB | Linear(1024→1024), stored fp16 |

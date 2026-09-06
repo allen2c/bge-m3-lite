@@ -63,4 +63,4 @@ job, see `verification.md`.
 | macOS VM | 110 tok/s | 132 tok/s (+20 %) |
 
 On Linux the MLAS GEMM kernels dominate, so the fusion mostly saves the small
-ops; the int8 build starts from the fused graph anyway (`quantization.md`).
+ops; the int8 build starts from the fused graph anyway (`quantization/recipe.md`).

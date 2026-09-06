@@ -55,7 +55,7 @@ Batches are bounded by `batch_size` texts **and** `max_batch_tokens` padded
 tokens (default 16384), so mixing short and 8192-token inputs stays within
 memory.
 `BGEM3Embedder(precision="int8")` loads a 4× smaller quantised backbone
-(see `docs/quantization.md` for the accuracy trade-off).
+(see `docs/quantization/` for the accuracy trade-off).
 
 ### CLI
 
@@ -90,4 +90,4 @@ platform), retrieval helpers, token-budget batching, Windows. Next (v0.4,
 built and measured, awaiting the CI matrix): attention in query chunks so an
 8192-token text needs 2.5 GB instead of 7 GB, a faster int8 graph, a
 documented calibration corpus and a held-out evaluation set. Plan and
-numbers: `docs/roadmap.md`.
+numbers: `docs/roadmap/`.

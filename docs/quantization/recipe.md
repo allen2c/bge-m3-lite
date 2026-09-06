@@ -1,18 +1,18 @@
-# Quantization (int8)
+# Quantization (int8): the recipe
 
 `BGEM3Embedder(precision="int8")` uses a quantised backbone; `fp32` stays the
 default because it is bit-exact with FlagEmbedding.
 
 ## What ships as `int8`
 
-Built by `bge-m3-lite quantize` from the **fused** fp32 graph (`fusion.md`),
+Built by `bge-m3-lite quantize` from the **fused** fp32 graph (`../fusion.md`),
 entirely with numpy on the ONNX graph (no extra dependency beyond the `quant`
 extra):
 
 1. **SmoothQuant** (α = 0.5) on the 96 projections (QKV, attention output,
    FFN in / out of every layer): per-input-channel scales
    `s_k = max|X_k|^α / max|W_k|^(1-α)` from the activations of 572 calibration
-   texts (`calibration.md`: 212 hand-written + 360 MIRACL passages, 512 tokens max);
+   texts (`../calibration.md`: 212 hand-written + 360 MIRACL passages, 512 tokens max);
    `W ← diag(s) W` and one `Mul` applies `X / s`. fp32 outputs are unchanged
    by this step (unit-tested); it tames the outlier channels of the LayerNorm
    outputs before quantisation.
@@ -27,7 +27,7 @@ extra):
    with a zero point of 128: MLAS's AVX2 u8·s8 kernel saturates its int16
    intermediates (`VPMADDUBSW`), u8·u8 does not. The merged QKV `Attention`
    becomes the same quantised projection + chunked `MultiHeadAttention`
-   (`memory.md`); the word embeddings are int8 rows with one scale per row.
+   (`../memory.md`); the word embeddings are int8 rows with one scale per row.
    The graph is opset 13 (per-axis `QuantizeLinear`); `Unsqueeze`/`ReduceSum`
    of the opset-11 export are converted.
 
@@ -53,7 +53,7 @@ v0.3.1 spelled the per-row scheme out with 20 standard ops per projection
 to dequantise), which ORT does not fuse: its `DynamicQuantizeMatMul` and
 `MatMulIntegerToFloat` fusions only match the per-tensor
 `DynamicQuantizeLinear` pattern, and the contrib kernels reject a per-row
-`a_zero_point` ("Per-Channel is not supported yet"). Measured on the M4
+`a_zero_point` ("Per-Channel is not supported yet"). measurements.md
 (single 2048 × 1024 × 4096 projection, ms): fp32 8.6, v0.3.1 chain 16.9,
 per-axis `QuantizeLinear` + `MatMulIntegerToFloat` 15.7, the same with a
 fixed zero point of 128 (symmetric) 13.8, ORT's per-tensor
@@ -72,69 +72,6 @@ row-wise graph makes the accurate scheme explicit; the cost is a chain of
 element-wise ops per projection (≈20–30 % of the int8 throughput on Linux,
 more on Apple Silicon where fp32 is already fast). int8 activations without a
 zero point are 5× slower on x86: MLAS has no s8·s8 kernel.
-
-## Measured on the M4 (`tools/eval_model.py`, 2026-09-06, v0.4 recipe)
-
-| variant | 11-set dense min / mean | sparse top-5 | held-out dense min / mean | held-out top-5 | colbert p5 | 128-tok tok/s |
-|---|---|---|---|---|---|---|
-| fp32 fused (chunked) | 1.0 | 11/11 | 1.0 | 40/40 | 1.0 | 2210 |
-| int8 v3 (v0.3.1 asset) | 0.9976 / 0.9987 | 9/11 | 0.9973 / 0.9987 | 29/40 | 0.992 | 1375 |
-| **int8 v4 (v0.4)** | 0.9982 / 0.9986 | 10/11 | 0.9977 / 0.9986 | 30/40 | 0.986–0.995 | 1532 |
-| int8 v4 `--symmetric` | 0.9968 / 0.9977 | 8/11 | 0.9961 / 0.9975 | 26/40 | 0.985 | 1580 |
-| int8 v3 + last FFN fp32 (+12 MB) | 0.9976 / 0.9987 | 10/11 | 0.9974 / 0.9988 | 29/40 | 0.992 | |
-| int8 v3 + last layer fp32 (+36 MB) | 0.9977 / 0.9988 | 9/11 | 0.9974 / 0.9988 | 30/40 | 0.992 | slower |
-| int8 v3 + last 2 layers fp32 (+72 MB) | 0.9978 / 0.9989 | 8/11 | 0.9976 / 0.9989 | 29/40 | 0.992 | 800–1080 |
-| int8 v3, α = 0.4 | 0.9978 / 0.9983 | 10/11 | 0.9968 / 0.9983 | 29/40 | 0.987 | |
-
-Sparse top-5 flips are near-ties: on every flipped text the fp32 gap between
-the swapped tokens is 0.001–0.009, the same size as the int8 noise
-(`--keep-fp32 REGEX` keeps chosen projections in fp32 for such experiments;
-none of the cheap variants above moves sparse accuracy beyond ±1 text).
-
-## v0.4 recipe on GitHub-hosted runners (4 vCPU, `tools/eval_model.py`, 2026-09-06)
-
-| runner | graph | dense min / mean (11 / held-out) | sparse top-5 (11 / held-out) | 128-tok tok/s |
-|---|---|---|---|---|
-| AMD EPYC 7763 (AVX2) | fp32 fused, chunked | 1.0 | 11/11, 40/40 | 263 |
-| | int8 v3 (v0.3.1) | 0.9983 / 0.9979 | 8/11, 29/40 | 346 |
-| | **int8 v4** | **0.9982 / 0.9971** | **9/11, 29/40** | **368** (376 with `--attention-chunk 0`) |
-| | int8 v4 `--symmetric` | 0.9969 / 0.9961 | 9/11, 26/40 | 383 |
-| Neoverse-N2 | fp32 fused, chunked | 1.0 | 11/11, 40/40 | 314 |
-| | int8 v3 | 0.9977 / 0.9974 | 10/11, 28/40 | 1103 |
-| | **int8 v4** | **0.9981 / 0.9978** | **7/11, 29/40** | **1117** (1134 unchunked) |
-| macOS VM (Apple M1, 3 vCPU) | fp32 fused, chunked | 1.0 | 11/11, 40/40 | 142 |
-| | int8 v3 | 0.9976 / 0.9973 | 9/11, 28/40 | 344 |
-| | **int8 v4** | **0.9981 / 0.9978** | **8/11, 24/40** | **411** |
-
-The Xeon (VNNI) runner was not drawn in these runs; its v0.3.1 numbers are
-below. Sparse top-5 counts move by ±3 between platforms and recipes for the
-same dense cosine: they are the near-ties described above, not a trend.
-
-## v0.3.1 recipe on GitHub-hosted runners (4 vCPU, 2026-09-06)
-
-| runner | variant | dense cos min / mean | sparse top-5 same | colbert p5 | 128-tok tok/s |
-|---|---|---|---|---|---|
-| x86_64 Xeon 8573C (VNNI) | fp32 fused | 1.0 | 11/11 | 1.0 | ~490 |
-| | int8 v3 | 0.9984 / 0.9988 | 11/11 | 0.993 | 742 |
-| | int8 v0.3.0 (per-tensor + SmoothQuant) | 0.927 / 0.969 | 7/11 | 0.62 | 1069 |
-| x86_64 AMD EPYC 7763 (AVX2) | fp32 fused | 1.0 | 11/11 | 1.0 | 275 |
-| | int8 v3 | 0.9984 / 0.9988 | 10/11 | 0.993 | 352 |
-| aarch64 Neoverse-N2 | fp32 fused | 1.0 | 11/11 | 1.0 | 316 |
-| | int8 v3 | 0.9986 / 0.9988 | 10/11 | 0.990 | 1120 |
-| | int8 v0.3.0 | 0.975 / 0.983 | 7/11 | 0.72 | 1323 |
-| macOS VM (3 cores) | fp32 fused | 1.0 | 11/11 | 1.0 | 127 |
-| | int8 v3 | 0.9986 / 0.9988 | 10/11 | 0.993 | 319 |
-
-Variants that lost (all kept out of the CLI): row-wise symmetric int8
-(0.9978, 104 tok/s on x86), 7-bit weights (0.9978, no speed gain), α = 0.65
-(dense 0.9990 but sparse 8/11), static MinMax calibration (0.59), 4-bit (0.95).
-
-On Apple Silicon (native M4) int8 v3 runs at ~1400 tok/s versus 2200 tok/s
-for fused fp32: use fp32 there unless memory matters (4× smaller).
-
-Sparse weights remain the most sensitive output (use fp32 when exact lexical
-scores matter); x86 speed depends on VNNI (Xeon 1.5× fp32, EPYC 1.3×), and
-the u8·u8 weights are what make the AVX2 result correct at all.
 
 ## Building other variants
 
