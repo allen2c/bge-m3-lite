@@ -59,8 +59,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
-      - run: uv sync --group dev
-      - run: uv run bge-m3-lite --quiet download
+      - run: uv sync --group dev --group quant
+      - run: uv run bge-m3-lite --quiet download || uv run bge-m3-lite --quiet fuse
       - run: BGE_M3_LITE_RUN_SLOW=1 uv run pytest -q -m slow
 
   bench:
@@ -76,7 +76,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync --group dev --group quant
-      - run: uv run bge-m3-lite --quiet download
+      - name: "download (before a release the pinned fused graph is not uploaded yet, so build it)"
+        run: uv run bge-m3-lite --quiet download || uv run bge-m3-lite --quiet fuse
       - name: fetch the shipped int8 asset (may not exist yet before a release)
         run: uv run python -c "from bge_m3_lite import hub; hub.ensure_files(hub.INT8_FILES, quiet=True)" || echo "::warning::int8 asset not available"
       - name: cpu model
