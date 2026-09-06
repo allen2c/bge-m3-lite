@@ -33,8 +33,9 @@ extra):
 
 Ships as `model_int8.onnx` (graph, 0.7 MB) + `model_int8.onnx_data` (weights,
 569 MiB; fp32: 2.27 GB) since v0.5: external data halves the resident memory
-(`../resources.md`). Deterministic build; `hub.INT8_FILES` pins sizes and
-SHA-256 digests.
+(`../resources.md`). Deterministic on a given machine (the calibration
+statistics are fp32 activations, so other CPUs give a different digest, see
+`measurements.md`); `hub.INT8_FILES` pins the M4 build.
 
 ```bash
 pip install "bge-m3-lite[quant]"       # onnx, onnx-ir, sympy (build time only)

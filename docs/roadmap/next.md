@@ -2,11 +2,18 @@
 
 Shipped versions and the facts behind them: `done.md`.
 
-## v0.4.x candidates (measure first)
+## int8 on Xeon (VNNI): the v4 recipe regressed (measured 2026-09-06)
 
-- Xeon (VNNI) numbers for v0.4: both bench runs drew the EPYC runner.
-  If the gain there is also below +20 %, profile the remaining scalar ops
-  (`ReduceMax/ReduceMin` are two extra passes over the input).
+- The Xeon 8573C runner was finally drawn: int8 v4 494 tok/s versus fp32
+  fused 576 (0.86×), where v3 did 742 (1.5×). Per-axis `QuantizeLinear` +
+  `MatMulIntegerToFloat` (u8·u8) apparently has no VNNI path that
+  `MatMulInteger` (v3) had. Candidates: keep `MatMulInteger` + `Cast`/`Mul`
+  on x86, or u8·s8 weights on VNNI only (`VPDPBUSD` does not saturate; the
+  AVX2 kernel does), or ORT's per-tensor `DynamicQuantizeMatMul` for the
+  projections whose activations tolerate it. Bench with `quantize_variants`
+  until `ubuntu-latest` draws the Xeon again (random).
+- Profile the remaining scalar ops (`ReduceMax/ReduceMin` are two extra
+  passes over the input).
 - `attention_chunk` per platform: 512 was chosen on the M4; the CI matrix
   may prefer 1024 (fewer iterations) on 4-vCPU runners.
 - Start-up of the int8 graph (1.1 s vs 0.4 s fp32): 2 700 nodes cost ORT

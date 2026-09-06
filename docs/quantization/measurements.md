@@ -36,9 +36,20 @@ none of the cheap variants above moves sparse accuracy beyond ±1 text).
 | | int8 v3 | 0.9976 / 0.9973 | 9/11, 28/40 | 344 |
 | | **int8 v4** | **0.9981 / 0.9978** | **8/11, 24/40** | **411** |
 
-The Xeon (VNNI) runner was not drawn in these runs; its v0.3.1 numbers are
-below. Sparse top-5 counts move by ±3 between platforms and recipes for the
+Sparse top-5 counts move by ±3 between platforms and recipes for the
 same dense cosine: they are the near-ties described above, not a trend.
+
+**Xeon 8573C (AVX-512 VNNI), drawn on 2026-09-06 with the v0.5.0 defaults
+(no spinning, ORT's 2 physical-core threads):** fp32 fused 576 tok/s, int8 v4
+(built on the runner) **494 tok/s, dense 0.9982 / 0.9977, sparse 11/11, 26/40**.
+The v4 recipe is 0.86× fp32 on VNNI where v3 was 1.5× (742 tok/s):
+`MatMulIntegerToFloat` with u8·u8 operands has no VNNI kernel path that
+`MatMulInteger` + `Cast` + `Mul` (v3) had. Open item in `../roadmap/next.md`.
+
+The int8 build is deterministic on one machine but not across CPUs: the
+SmoothQuant statistics are fp32 activations, so every runner produced a
+different `model_int8.onnx_data` digest (same size) and the same accuracy
+within ±0.0002 dense cosine. The pinned asset is the M4 build.
 
 ## v0.3.1 recipe on GitHub-hosted runners (4 vCPU, 2026-09-06)
 

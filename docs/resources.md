@@ -63,6 +63,19 @@ short query packs B again: 40 / 21 ms wall, 150 / 67 ms CPU (2×). Right for
 serverless and one-shot CLI use, wrong for a resident service. Disabling the
 arena as well changes nothing on load and costs 140 MiB after a batch.
 
-## GitHub-hosted runners
+## GitHub-hosted runners (CI `bench`, 4 vCPU, v0.5.0 defaults, 2026-09-06)
 
-(filled from the CI `bench` matrix, see `verification.md`)
+| runner | backbone | start-up | RSS load / peak | 128 × 16 tok/s | CPU-s / 1k tok | short query wall / CPU | idle |
+|---|---|---|---|---|---|---|---|
+| Xeon 8573C (2 cores × 2 SMT, ORT default 2 threads) | fp32 fused | 0.84 s | 1271 / 1695 MiB | 576 | 3.44 | 56 / 108 ms | 0 |
+| | int8 (built on the runner) | 1.38 s | 417 / 930 MiB | 494 | 3.97 | 29 / 50 ms | 0 |
+| Neoverse-N2 (4 cores, 4 threads) | fp32 fused | 0.88 s | 1270 / 1684 MiB | 306 | 12.7 | 55 / 195 ms | 0 |
+| | int8 | 1.84 s | 416 / 920 MiB | 1100 | 3.21 | 26 / 59 ms | 0 |
+| Apple M1 VM (3 vCPU, 3 threads) | fp32 fused | 4.6 s | 1279 / 1631 MiB | 232 | 11.2 | 65 / 142 ms | 0 |
+| | int8 | 1.35 s | 419 / 718 MiB | 581 | 4.54 | 44 / 86 ms | 0 |
+
+`os-threads` in the log confirms onnxruntime's default of physical cores: the
+SMT Xeon runner starts two fewer workers than the ARM one. The raw export
+`model.onnx` costs the same RSS as the fused graph (1275 MiB) at 5–10 % less
+throughput. Xeon: int8 v4 is *slower* than fp32 there (494 vs 576 tok/s; the
+v0.3.1 recipe did 742), see `quantization/measurements.md`.

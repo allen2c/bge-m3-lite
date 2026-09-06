@@ -37,8 +37,16 @@ on all three Linux/macOS runners.
 
 ## GitHub-hosted runners (`tools/eval_model.py`, 4 vCPU)
 
-v0.4.0 (chunked attention, int8 v4; the Xeon runner was not drawn, see
-`quantization/measurements.md` for accuracy):
+v0.5.0 (no spinning, ORT default threads = physical cores; memory and CPU
+columns in `resources.md`):
+
+| runner | CPU | fp32 fused 128-tok | int8 v4 128-tok | int8 speed-up |
+|---|---|---|---|---|
+| `ubuntu-latest` x86_64 | Xeon Platinum 8573C (AVX-512 VNNI) | 576 tok/s | 494 tok/s | 0.86× (regression, `roadmap/next.md`) |
+| `ubuntu-24.04-arm` | Neoverse-N2 | 306 tok/s | 1100 tok/s | 3.6× |
+| `macos-latest` (VM) | Apple M1, 3 cores | 232 tok/s | 581 tok/s | 2.5× |
+
+v0.4.0 (chunked attention, int8 v4):
 
 | runner | CPU | fp32 fused 128-tok | int8 v4 128-tok | int8 speed-up |
 |---|---|---|---|---|
