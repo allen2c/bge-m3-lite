@@ -95,18 +95,8 @@ def _ops(model) -> set[str]:
     return ops
 
 
-@pytest.mark.parametrize(
-    ("zero_point", "chunk", "kernel"),
-    [
-        (True, 4, {}),
-        (True, 0, {}),
-        (False, 4, {}),
-        (True, 4, {"matmul_integer": True}),
-        (False, 0, {"signed_weights": True}),
-        (True, 0, {"matmul_integer": True, "signed_weights": True}),
-    ],
-)
-def test_rowwise_matmul_and_attention(zero_point, chunk, kernel):
+@pytest.mark.parametrize(("zero_point", "chunk"), [(True, 4), (True, 0), (False, 4)])
+def test_rowwise_matmul_and_attention(zero_point, chunk):
     onnx = pytest.importorskip("onnx")
     import numpy as np
     import onnxruntime as ort
@@ -166,21 +156,9 @@ def test_rowwise_matmul_and_attention(zero_point, chunk, kernel):
         quantize_embeddings=True,
         zero_point=zero_point,
         attention_chunk=chunk,
-        **kernel,
     )
     ops = _ops(model)
-    gemm = "MatMulInteger" if kernel.get("matmul_integer") else "MatMulIntegerToFloat"
-    assert {gemm, "QuantizeLinear", "MultiHeadAttention"} <= ops
-    w_type = (
-        onnx.TensorProto.INT8
-        if kernel.get("signed_weights")
-        else onnx.TensorProto.UINT8
-    )
-    assert all(
-        t.data_type == w_type
-        for t in model.graph.initializer
-        if t.name in ("w_qkv", "w_out")
-    )
+    assert {"MatMulIntegerToFloat", "QuantizeLinear", "MultiHeadAttention"} <= ops
     assert ("Loop" in ops) == (chunk > 0)  # seq 6 with chunk 4: two iterations
     assert "Attention" not in ops and "MatMul" not in ops
     assert all(

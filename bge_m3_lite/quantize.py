@@ -68,8 +68,6 @@ class QuantConfig:
     smooth_alpha: float | None = 0.5  # SmoothQuant strength, None = off
     calibration_max_length: int = 512
     symmetric: bool = False  # rowwise: fixed zero point 128 instead of per-row
-    matmul_integer: bool = False  # rowwise: MatMulInteger + Cast + Mul (v3 kernel path)
-    signed_weights: bool = False  # rowwise: int8 weights, zero point 0 (u8·s8 kernels)
     attention_chunk: int = ATTENTION_CHUNK  # query rows per attention pass, 0 = off
     layer_loop: bool = (
         False  # layer tail inside the attention Loop: fp32 only (memory.md)
@@ -196,8 +194,6 @@ def _quantize(
             keep_fp32=config.keep_fp32,
             attention_chunk=config.attention_chunk,
             layer_loop=config.layer_loop,
-            matmul_integer=config.matmul_integer,
-            signed_weights=config.signed_weights,
         )
     elif config.method == "dynamic":
         tmp = model_out.with_name(model_out.name + ".tmp")
@@ -657,8 +653,6 @@ def _quantize_rowwise(
     keep_fp32: tuple[str, ...] = (),
     attention_chunk: int = ATTENTION_CHUNK,
     layer_loop: bool = False,
-    matmul_integer: bool = False,
-    signed_weights: bool = False,
 ) -> None:
     import onnx
     from onnx import helper, numpy_helper
@@ -696,17 +690,13 @@ def _quantize_rowwise(
         k, n = w.shape
         w_scale = np.maximum(np.abs(w).max(axis=0) / _QI8_MAX, 1e-12)
         w_q = np.clip(np.round(w / w_scale), -_QI8_MAX, _QI8_MAX).astype(np.int8)
-        if signed_weights:  # u8·s8: saturates MLAS's AVX2 kernel, fine on VNNI/ARM
-            inits[w_name].CopyFrom(numpy_helper.from_array(w_q, w_name))
-            b_zp = const(f"{prefix}/b_zp", np.zeros((n,), dtype=np.int8))
-        else:
-            inits[w_name].CopyFrom(
-                numpy_helper.from_array(
-                    (w_q.astype(np.int16) + 128).astype(np.uint8), w_name
-                )
+        inits[w_name].CopyFrom(
+            numpy_helper.from_array(
+                (w_q.astype(np.int16) + 128).astype(np.uint8), w_name
             )
-            b_zp = const(f"{prefix}/b_zp", np.full((n,), 128, dtype=np.uint8))
+        )
         ws = const(f"{prefix}/w_scale", w_scale.astype(np.float32))
+        b_zp = const(f"{prefix}/b_zp", np.full((n,), 128, dtype=np.uint8))
         shp = const(f"{prefix}/shape2d", np.array([-1, k], dtype=np.int64))
         n_const = const(f"{prefix}/n", np.array([n], dtype=np.int64))
         p = prefix
@@ -717,16 +707,6 @@ def _quantize_rowwise(
             mk("ReduceMin", [f"{p}/x2d"], [f"{p}/mn0"], axes=[1], keepdims=1),
         ]
         mm = [f"{p}/xq", w_name, c_one, ws, c_a_zp, b_zp]
-
-        def gemm(out: str) -> list[Any]:
-            if not matmul_integer:
-                return [mk("MatMulIntegerToFloat", mm, [out], domain="com.microsoft")]
-            return [  # the v3 path: int32 GEMM, then the weight scale in fp32
-                mk("MatMulInteger", [f"{p}/xq", w_name, c_a_zp, b_zp], [f"{p}/yi"]),
-                mk("Cast", [f"{p}/yi"], [f"{p}/yf"], to=onnx.TensorProto.FLOAT),
-                mk("Mul", [f"{p}/yf", ws], [out]),
-            ]
-
         if zero_point:
             colsum = const(
                 f"{p}/colsum",
@@ -752,7 +732,7 @@ def _quantize_rowwise(
                     [f"{p}/xq"],
                     axis=0,
                 ),
-                *gemm(f"{p}/y0"),
+                mk("MatMulIntegerToFloat", mm, [f"{p}/y0"], domain="com.microsoft"),
                 mk("Mul", [f"{p}/zp", colsum], [f"{p}/corr"]),
                 mk("Sub", [f"{p}/y0", f"{p}/corr"], [f"{p}/yc"]),
                 mk("Mul", [f"{p}/yc", f"{p}/scale"], [f"{p}/y2d"]),
@@ -772,7 +752,7 @@ def _quantize_rowwise(
                     [f"{p}/xq"],
                     axis=0,
                 ),
-                *gemm(f"{p}/y0"),
+                mk("MatMulIntegerToFloat", mm, [f"{p}/y0"], domain="com.microsoft"),
                 mk("Mul", [f"{p}/y0", f"{p}/scale"], [f"{p}/y2d"]),
             ]
         nodes += [

@@ -49,8 +49,6 @@ def _cmd_quantize(args: argparse.Namespace) -> int:
         quantize_embeddings=not args.keep_embeddings,
         smooth_alpha=None if args.no_smooth else args.alpha,
         symmetric=args.symmetric,
-        matmul_integer=args.matmul_integer,
-        signed_weights=args.signed_weights,
         attention_chunk=args.attention_chunk,
         layer_loop=args.layer_loop,
         keep_fp32=tuple(args.keep_fp32 or ()),
@@ -218,17 +216,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--symmetric",
         action="store_true",
         help="rowwise only: symmetric per-row activations (faster, less exact)",
-    )
-    q.add_argument(
-        "--matmul-integer",
-        action="store_true",
-        help="rowwise only: MatMulInteger + Cast + Mul instead of MatMulIntegerToFloat",
-    )
-    q.add_argument(
-        "--signed-weights",
-        action="store_true",
-        help="rowwise only: int8 weights with zero point 0 (u8·s8 kernels; "
-        "inaccurate on AVX2, see docs/quantization/)",
     )
     q.add_argument(
         "--keep-fp32",
