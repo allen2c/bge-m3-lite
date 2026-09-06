@@ -4,7 +4,8 @@
 
 ```
 text ─► tokenizer.py ─► input_ids/attention_mask (int64)
-     ─► model.py (onnxruntime, model.onnx) ─► token_embeddings (B, S, 1024) fp32
+     ─► model.py (onnxruntime; model_fused.onnx | model.onnx | model_int8.onnx)
+        ─► token_embeddings (B, S, 1024) fp32
      ─► embedder.py:
           dense   = normalize(h[:, 0])
           sparse  = relu(h @ Wsp + b) → max per token id, drop <s> </s> <pad> <unk>, keep w > 0
@@ -27,14 +28,15 @@ Formulas follow `FlagEmbedding/inference/embedder/encoder_only/m3.py` and
 | `model.py` | `OnnxBackbone`: ORT session, CPU provider, `ORT_ENABLE_ALL` |
 | `fuse.py`, `quantize.py`, `calibration.txt` | build-time only (`quant` extra): fused fp32 graph, SmoothQuant + int8 backbone |
 | `embedder.py` | `BGEM3Embedder`: batching (longest first, text + token budget), pooling, `compute_score` |
-| `cli.py` | `bge-m3-lite download / info / encode / quantize` |
+| `cli.py` | `bge-m3-lite download / info / encode / fuse / quantize` |
 
 ## Model files (Hugging Face `BAAI/bge-m3`, revision `5617a9f6`)
 
 | file | size | note |
 |---|---|---|
 | `onnx/model.onnx` + `model.onnx_data` + `Constant_7_attr__value` | 2.27 GB | official opset-11 export, outputs `token_embeddings`, `sentence_embedding` |
-| `model_fused.onnx` + `model_fused.onnx_data` (release asset) | 288 MB | fused graph, shares `model.onnx_data` (`docs/fusion.md`) |
+| `model_fused.onnx` + `model_fused.onnx_data` (release asset) | 288 MB | fused graph, shares `model.onnx_data` (`fusion.md`) |
+| `model_int8.onnx` (release asset) | 569 MB | row-wise int8 backbone (`quantization.md`) |
 | `sentencepiece.bpe.model` | 5 MB | 250 000 pieces, unigram, `nmt_nfkc` precompiled charsmap |
 | `sentencepiece.bpe.model.cache` | 4 MB | written locally on first load: parsed vocabulary keyed by the model's SHA-256 (no pickle) |
 | `colbert_linear.pt` | 2 MB | Linear(1024→1024), stored fp16 |

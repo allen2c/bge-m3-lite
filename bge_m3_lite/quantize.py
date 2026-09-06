@@ -1,23 +1,20 @@
-"""Build the quantised backbone from the cached fp32 model.
+"""Build the quantised backbone from the cached fused fp32 graph.
 
-Requires the optional ``quant`` extra (``pip install "bge-m3-lite[quant]"``):
-``onnx`` and ``onnx-ir`` are only imported inside :func:`quantize`, never at
-runtime. Two methods are supported:
+Requires the optional ``quant`` extra (``pip install "bge-m3-lite[quant]"``);
+``onnx`` is only imported inside :func:`quantize`, never at runtime. Methods:
 
-* ``dynamic``: int8 weights + uint8 activations (``quantize_dynamic``,
-  per-channel), preceded by SmoothQuant on the fused graph (see below).
-  Smallest compute cost on x86 with VNNI.
-* ``nbits``: weight-only ``MatMulNBits`` (4 or 8 bit, block-wise scales,
-  ``accuracy_level=4`` computes in int8 on ARM/x86). Better accuracy.
+* ``rowwise`` (default, shipped): SmoothQuant, then per-token uint8
+  activations with a zero point and per-column int8 weights, written out with
+  standard ops (``MatMulInteger``) so every CPU computes the same thing.
+* ``dynamic``: ORT ``quantize_dynamic`` (per-tensor activations). Faster
+  kernels, but its accuracy depends on the platform (see docs/quantization.md).
+* ``nbits``: weight-only ``MatMulNBits`` (4 or 8 bit, block-wise scales).
 
 SmoothQuant (Xiao et al. 2022) moves the activation outliers of the LayerNorm
-outputs into the following weights: for a projection ``Y = X W`` and a
-per-input-channel scale ``s``, ``Y = (X / s) (diag(s) W)``. ``X / s`` has a much
-tighter per-tensor range, which is what the dynamic uint8 quantisation of the
-activations needs. ``s_k = max|X_k|^alpha / max|W_k|^(1 - alpha)`` with the
-activation statistics collected on a small multilingual calibration set
-(``calibration.txt``). Implemented here with numpy on the ONNX graph: one
-``Mul`` per projection, weights rescaled in place.
+outputs into the following weights: for ``Y = X W`` and a per-input-channel
+scale ``s``, ``Y = (X / s) (diag(s) W)``; ``s_k = max|X_k|^alpha /
+max|W_k|^(1 - alpha)`` with statistics from ``calibration.txt``. One ``Mul``
+per projection, weights rescaled in place, fp32 outputs unchanged.
 """
 
 from __future__ import annotations
@@ -50,9 +47,6 @@ class QuantConfig:
     quantize_embeddings: bool = True  # also quantise the word-embedding Gather
     smooth_alpha: float | None = 0.5  # SmoothQuant strength, None = off
     calibration_max_length: int = 512
-    rowwise_zero_point: bool = True  # uint8 activations with a per-row zero point
-    reduce_range: bool = False  # 7-bit weights: avoids u8s8 saturation on AVX2
-    weight_uint8: bool = True  # u8u8 GEMM: u8s8 saturates int16 on AVX2 (VPMADDUBSW)
 
 
 def load_calibration_texts(path: str | Path = CALIBRATION_FILE) -> list[str]:
@@ -96,43 +90,32 @@ def quantize(
         ops.append("Attention")
         if not any(o.domain == "com.microsoft" for o in model.opset_import):
             model.opset_import.add(domain="com.microsoft", version=1)
-    if config.method == "rowwise":
-        if not fused:
-            raise ValueError("rowwise quantisation needs the fused graph")
-        if config.smooth_alpha is not None:
-            texts = (
-                list(calibration_texts)
-                if calibration_texts is not None
-                else load_calibration_texts()
-            )
-            tok = tokenizer_path or model_in.with_name("sentencepiece.bpe.model")
-            stats = _activation_stats(model_in, model, texts, tok, config)
-            _smooth(model, stats, config.smooth_alpha)
-        _quantize_rowwise(
-            model,
-            quantize_embeddings=config.quantize_embeddings,
-            zero_point=config.rowwise_zero_point,
-            reduce_range=config.reduce_range,
-            weight_uint8=config.weight_uint8,
+    if config.method == "rowwise" and not fused:
+        raise ValueError(
+            "rowwise quantisation needs the fused graph (bge-m3-lite fuse)"
         )
+    if config.smooth_alpha is not None and fused and config.method != "nbits":
+        texts = (
+            list(calibration_texts)
+            if calibration_texts is not None
+            else load_calibration_texts()
+        )
+        tok = tokenizer_path or model_in.with_name("sentencepiece.bpe.model")
+        _smooth(
+            model,
+            _activation_stats(model_in, model, texts, tok, config),
+            config.smooth_alpha,
+        )
+    if config.method == "rowwise":
+        _quantize_rowwise(model, quantize_embeddings=config.quantize_embeddings)
         onnx.save_model(model, str(model_out))
     elif config.method == "dynamic":
-        if config.smooth_alpha is not None and fused:
-            texts = (
-                list(calibration_texts)
-                if calibration_texts is not None
-                else load_calibration_texts()
-            )
-            tok = tokenizer_path or model_in.with_name("sentencepiece.bpe.model")
-            stats = _activation_stats(model_in, model, texts, tok, config)
-            _smooth(model, stats, config.smooth_alpha)
         quantize_dynamic(
             model,
             str(model_out),
             op_types_to_quantize=ops,
             per_channel=True,
-            reduce_range=config.reduce_range,
-            weight_type=QuantType.QUInt8 if config.weight_uint8 else QuantType.QInt8,
+            weight_type=QuantType.QInt8,
             use_external_data_format=False,
             extra_options={"DefaultTensorType": onnx.TensorProto.FLOAT},
         )
@@ -258,17 +241,23 @@ def _smooth(model: Any, stats: dict[str, np.ndarray], alpha: float) -> None:
 
 # -- row-wise dynamic int8 (platform independent) ------------------------------
 #
-# ORT's ``quantize_dynamic`` quantises activations per *tensor* (one uint8
-# scale for the whole (batch, seq, hidden) block). Its ``DynamicQuantizeMatMul``
-# kernel on Apple Silicon (KleidiAI) silently switches to per-row scales and is
-# far more accurate (dense cosine 0.998 vs 0.983 elsewhere). The graph below
-# spells that per-row scheme out with standard ops so every platform gets it:
+# ORT's ``quantize_dynamic`` quantises activations per *tensor*. Its
+# ``DynamicQuantizeMatMul`` kernel on Apple Silicon (KleidiAI) silently switches
+# to per-row scales and is far more accurate (dense cosine 0.998 vs 0.983 on
+# every other CPU). The graph below spells that per-row scheme out with
+# standard ops so every platform computes the same thing:
 #
-#   Xr = Reshape(X, [-1, K]);  s = max|Xr| / 127 per row
-#   Xq = int8(round(Xr / s));  Y = MatMulInteger(Xq, Wq) * s * w_scale
+#   Xr = Reshape(X, [-1, K]);  s = (max Xr - min Xr) / 255 per row;  z = -min / s
+#   Q  = uint8(round(Xr / s) + z)
+#   Y  = s * (MatMulInteger(Q, Wq) - z * colsum(Wq)) * w_scale
 #
-# with per-column symmetric int8 weights. The merged QKV ``Attention`` op is
-# split into the same quantised projection + ``MultiHeadAttention``.
+# ``MatMulInteger`` has no per-row zero point, hence the ``colsum`` correction.
+# Weights are per-column symmetric int8 stored as uint8 with zero point 128
+# (removed by ``MatMulInteger`` itself): the u8·s8 AVX2 kernel saturates its
+# int16 intermediates, u8·u8 does not, and the integer results are identical.
+# Signed int8 activations (``zero_point=False``) lose a bit and are 5x slower
+# on x86 (no s8·s8 kernel); both switches stay only for the tests.
+# The merged QKV ``Attention`` becomes the same projection + ``MultiHeadAttention``.
 
 _QI8_MAX = 127.0
 
@@ -277,9 +266,8 @@ def _quantize_rowwise(
     model: Any,
     *,
     quantize_embeddings: bool,
-    zero_point: bool = False,
-    reduce_range: bool = False,
-    weight_uint8: bool = False,
+    zero_point: bool = True,
+    weight_uint8: bool = True,
 ) -> None:
     import onnx
     from onnx import helper, numpy_helper
@@ -305,14 +293,10 @@ def _quantize_rowwise(
         """Nodes computing ``out = x @ W`` with per-row int8 activations."""
         w = numpy_helper.to_array(inits[w_name]).astype(np.float32)  # (K, N)
         k, n = w.shape
-        w_max = 63.0 if reduce_range else _QI8_MAX  # 7-bit: no u8s8 AVX2 overflow
-        w_scale = np.maximum(np.abs(w).max(axis=0) / w_max, 1e-12)
-        w_q = np.clip(np.round(w / w_scale), -w_max, w_max).astype(np.int8)
+        w_scale = np.maximum(np.abs(w).max(axis=0) / _QI8_MAX, 1e-12)
+        w_q = np.clip(np.round(w / w_scale), -_QI8_MAX, _QI8_MAX).astype(np.int8)
         mm_inputs = [f"{prefix}/xq", w_name]
         if weight_uint8:
-            # u8·u8 GEMM: same integers, but no int16 saturation on AVX2
-            # (u8·s8 there goes through VPMADDUBSW). The zero point of 128 is
-            # removed by MatMulInteger itself (per-column b_zero_point).
             inits[w_name].CopyFrom(
                 numpy_helper.from_array(
                     (w_q.astype(np.int16) + 128).astype(np.uint8), w_name
@@ -334,7 +318,6 @@ def _quantize_rowwise(
         mk = helper.make_node
         nodes = [mk("Reshape", [x, shp], [f"{p}/x2d"])]
         if zero_point:
-            # asymmetric: q = round(x / s) + z, x @ W = s * (q @ Wq - z * colsum(Wq))
             colsum = const(
                 f"{p}/colsum",
                 w_q.astype(np.int32)

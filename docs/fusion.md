@@ -1,4 +1,4 @@
-# Fused fp32 backbone (v0.2.0)
+# Fused fp32 backbone
 
 `BGEM3Embedder()` runs a fused version of the Hub ONNX export by default.
 The outputs are unchanged (the slow suite compares against FlagEmbedding with

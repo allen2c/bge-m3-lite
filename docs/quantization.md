@@ -1,4 +1,4 @@
-# Quantization (int8, v0.3.1)
+# Quantization (int8)
 
 `BGEM3Embedder(precision="int8")` uses a quantised backbone; `fp32` stays the
 default because it is bit-exact with FlagEmbedding.
@@ -34,7 +34,6 @@ Single file `model_int8.onnx`, 569 MiB (fp32: 2.27 GB). Deterministic build;
 pip install "bge-m3-lite[quant]"       # onnx, onnx-ir, sympy (build time only)
 bge-m3-lite quantize                    # writes model_int8.onnx into the cache
 bge-m3-lite quantize --alpha 0.65       # other SmoothQuant strengths
-bge-m3-lite quantize --weights s8       # u8·s8 GEMM: only correct on VNNI / ARM CPUs
 bge-m3-lite quantize --method dynamic   # ORT's per-tensor quantize_dynamic (v0.0.2/v0.3.0 style)
 bge-m3-lite encode --int8 "text"
 ```
@@ -52,7 +51,7 @@ scales, which is why v0.3.0 measured dense cosine 0.998 on an M4 but only
 row-wise graph makes the accurate scheme explicit; the cost is a chain of
 element-wise ops per projection (≈20–30 % of the int8 throughput on Linux,
 more on Apple Silicon where fp32 is already fast). int8 activations without a
-zero point (`--symmetric`) are 5× slower on x86: MLAS has no s8·s8 kernel.
+zero point are 5× slower on x86: MLAS has no s8·s8 kernel.
 
 ## Measured on GitHub-hosted runners (4 vCPU, `tools/eval_model.py`, 2026-09-06)
 
@@ -73,9 +72,9 @@ zero point (`--symmetric`) are 5× slower on x86: MLAS has no s8·s8 kernel.
 | | **int8 v3** | **0.9986 / 0.9988** | **10/11** | **0.993** | **319** |
 | | int8 v0.3.0 | 0.974 / 0.983 | 7/11 | 0.78 | 397 |
 
-Variants that lost: row-wise symmetric int8 (0.9978, 104 tok/s on x86),
-`--reduce-range` (0.9978, no speed gain), α = 0.65 (dense 0.9990 but sparse
-8/11), static MinMax calibration (0.59), 4-bit (0.95).
+Variants that lost (all kept out of the CLI): row-wise symmetric int8
+(0.9978, 104 tok/s on x86), 7-bit weights (0.9978, no speed gain), α = 0.65
+(dense 0.9990 but sparse 8/11), static MinMax calibration (0.59), 4-bit (0.95).
 
 On Apple Silicon (native M4) int8 v3 runs at ~1400 tok/s versus 2200 tok/s
 for fused fp32: use fp32 there unless memory matters (4× smaller).

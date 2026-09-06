@@ -3,7 +3,7 @@
 ## Setup and checks
 
 ```bash
-uv sync --group dev
+uv sync --group dev --group quant
 uv run ruff format . && uv run ruff check . && uv run pyright
 uv run pyproject-fmt --check pyproject.toml
 uv run pytest                                   # downloads ~7 MB of small files once
@@ -30,44 +30,30 @@ docker run --rm --platform linux/arm64 -v $PWD:/src:ro python:3.12-slim sh -c \
 # linux/amd64 works the same way through QEMU (slower).
 ```
 
-## Release (manual, run by the maintainer)
+## Release (maintainer)
 
-1. Bump `version` in `pyproject.toml` and `bge_m3_lite/__init__.py`, commit.
-2. Run every check above, including the slow suite.
-3. Tag and push:
+1. Bump `version` in `pyproject.toml` and `bge_m3_lite/__init__.py`; if a
+   model asset changed, pin its size + SHA-256 and release URL in `hub.py`.
+2. Run every check above, including the slow suite. New int8 recipes must be
+   validated on the CI `bench` matrix first (`workflow_dispatch`, input
+   `quantize_variants`, e.g. `--alpha 0.65|--method dynamic`): int8 accuracy
+   differs between CPUs, the development machine is not representative.
+3. Tag and push; `release.yml` runs the checks, publishes to PyPI via trusted
+   publishing (environment `pypi`) and creates the GitHub release:
    ```bash
-   git tag -a v0.1.0 -m "v0.1.0"
-   git push origin main --tags
+   git tag -a v0.3.1 -m v0.3.1 && git push origin v0.3.1
    ```
-4. Pushing the tag runs `.github/workflows/release.yml`: checks, build, then
-   publish to PyPI via trusted publishing and attach the wheel to a GitHub
-   release. One-time setup:
-   - PyPI → your account → *Publishing* → add a pending publisher:
-     project `bge-m3-lite`, owner/repo of this repository, workflow
-     `release.yml`, environment `pypi`.
-   - GitHub repo → Settings → Environments → create `pypi` (optionally require
-     reviewers).
-   Manual fallback: `uv build && uv publish --token pypi-...`.
-5. Upload `model_int8.onnx` to the same release (see *Release assets*).
-   Model files are never part of the wheel; they are pinned by revision +
-   SHA-256 in `hub.py`.
+4. Upload the model assets the new `hub.py` points at (deterministic builds,
+   compare the printed digests first). Run `gh` inside the repository: leaving
+   it unloads the direnv-provided `GH_TOKEN`.
+   ```bash
+   bge-m3-lite fuse        # model_fused.onnx + model_fused.onnx_data (hub.FUSED_FILES)
+   bge-m3-lite quantize    # model_int8.onnx (hub.INT8_FILE)
+   gh release upload v0.3.1 -R allen2c/bge-m3-lite ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx
+   ```
+   Until the upload finishes, fresh installs of that version cannot download
+   the asset. Unchanged assets stay on their old release (per-file URLs).
 
-## Release assets
-
-Model files are never part of the wheel. Two kinds of assets are attached to
-the GitHub release named in `hub.py`, each pinned there by size and SHA-256:
-
-```bash
-bge-m3-lite fuse        # model_fused.onnx + model_fused.onnx_data (hub.FUSED_FILES)
-bge-m3-lite quantize    # model_int8.onnx (hub.INT8_FILE)
-gh release upload v0.2.0 ~/.cache/bge-m3-lite/BAAI--bge-m3/model_fused.onnx \
-    ~/.cache/bge-m3-lite/BAAI--bge-m3/model_fused.onnx_data
-```
-
-Both builds are deterministic; compare the printed digests with `hub.py`
-before uploading. A file that is already in the cache with the right size and
-digest is used without downloading.
-
-## Roadmap
-
-See `roadmap.md` for the version plan and the measurements behind it.
+One-time setup: PyPI pending publisher (`release.yml`, environment `pypi`)
+and the `pypi` environment in the repository settings. Manual fallback:
+`uv build && uv publish --token pypi-...`.

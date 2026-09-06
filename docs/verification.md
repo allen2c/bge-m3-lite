@@ -21,7 +21,7 @@ Run with `BGE_M3_LITE_RUN_SLOW=1 uv run pytest -m slow` (tolerances 1e-4 / 1e-3)
 | macOS arm64 (M4) | native | fast + slow suites pass |
 | Linux aarch64 | Docker `python:3.12-slim` on Apple Silicon; CI `ubuntu-24.04-arm` | fast + slow suites pass, ORT 1.29.0 |
 | Linux x86_64 | CI `ubuntu-latest` (Xeon Platinum 8573C) | fast suite + full-model `bench` pass, fp32 exact |
-| Windows x86_64 | CI `windows-latest` | fast suite (v0.1.0) |
+| Windows x86_64 | CI `windows-latest` | fast suite, including the int8 graph unit tests |
 
 `ubuntu-24.04-arm` runners are free for public repositories only. The `bench`
 job (`workflow_dispatch`) downloads the model and runs `tools/eval_model.py`
@@ -60,7 +60,7 @@ The macOS runner is a throttled VM; use the M4 numbers above for Apple Silicon.
 | total | 0.86 s | 0.6 s |
 
 Cold start is dominated by reading 2.3 GB of weights; the int8 backbone
-(543 MB) starts in about a third of the time. Saving the ORT-optimised graph
+(569 MB) starts in about a third of the time. Saving the ORT-optimised graph
 does not help (0.38 s → 0.33 s for session creation), see `roadmap.md`.
 
 ## Memory

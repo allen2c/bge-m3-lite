@@ -78,7 +78,6 @@ def test_cli_quantize_smooth_flags():
 
     args = build_parser().parse_args(["quantize"])
     assert args.method == "rowwise" and args.alpha == 0.5 and not args.no_smooth
-    assert not args.symmetric and args.weights == "u8"
     args = build_parser().parse_args(["quantize", "--method", "dynamic", "--no-smooth"])
     assert args.method == "dynamic" and args.no_smooth
 

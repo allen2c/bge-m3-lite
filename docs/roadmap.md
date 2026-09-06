@@ -54,9 +54,8 @@ step is gated by the fixtures in `tests/fixtures/` staying green.
   VNNI) to 3.5× (ARM) faster than fp32, 20–30 % slower than the per-tensor
   kernels. Details and the discarded variants: `quantization.md`.
 - Also: the fused graph declares the `com.microsoft` opset (onnx tooling
-  needs it), `quantize` gained `--method/--alpha/--calibration/--symmetric/
-  --weights/--reduce-range`, and the CI `bench` job accepts a
-  `quantize_variants` matrix.
+  needs it), `quantize` gained `--method/--alpha/--calibration`, and the CI
+  `bench` job accepts a `quantize_variants` matrix.
 
 ## Later
 
