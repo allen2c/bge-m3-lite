@@ -71,7 +71,9 @@ class QuantConfig:
     matmul_integer: bool = False  # rowwise: MatMulInteger + Cast + Mul (v3 kernel path)
     signed_weights: bool = False  # rowwise: int8 weights, zero point 0 (u8·s8 kernels)
     attention_chunk: int = ATTENTION_CHUNK  # query rows per attention pass, 0 = off
-    layer_loop: bool = True  # whole layer tail inside the attention Loop (v0.5.2)
+    layer_loop: bool = (
+        False  # layer tail inside the attention Loop: fp32 only (memory.md)
+    )
     # node-name regexes whose MatMul / Attention stay fp32 (experiments)
     keep_fp32: tuple[str, ...] = ()
 
@@ -101,6 +103,12 @@ def quantize(
     ``sentencepiece.bpe.model`` next to the model and is only needed for
     SmoothQuant calibration.
 
+    A shipped fused graph already carries the attention ``Loop`` (with the
+    layer tail inside it since v0.5.2), which would hide the projections from
+    the calibration probe and freeze the chunk: the rowwise recipe therefore
+    rebuilds an unchunked fused graph from ``model.onnx`` next to ``model_in``
+    (temporary files in the same directory) and quantises that.
+
     The weights go to ``<model_out>_data`` next to the graph (external data,
     like the fused graph): onnxruntime then maps the file instead of keeping
     a parsed protobuf copy of every tensor, see docs/resources.md.
@@ -108,7 +116,7 @@ def quantize(
     config = config or QuantConfig()
     try:
         import onnx
-        from onnxruntime.quantization import QuantType, quantize_dynamic
+        import onnxruntime.quantization  # noqa: F401  (needed by _quantize)
     except ImportError as exc:  # pragma: no cover - depends on the environment
         raise ImportError(
             'quantisation needs the "quant" extra: pip install "bge-m3-lite[quant]"'
@@ -122,6 +130,44 @@ def quantize(
     # turns ``Attention`` into ``QAttention``.
     model = onnx.load(str(model_in))
     fused = any(n.domain == "com.microsoft" for n in model.graph.node)
+    temp: list[Path] = []
+    if fused and any(n.op_type == "Loop" for n in model.graph.node):
+        from bge_m3_lite.fuse import fuse
+
+        base = f".fused-{os.getpid()}"
+        fuse(model_in.with_name("model.onnx"), attention_chunk=0, basename=base)
+        model_in = model_in.with_name(f"{base}.onnx")
+        temp = [model_in, model_in.with_name(f"{base}.onnx_data")]
+        model = onnx.load(str(model_in))
+    try:
+        return _quantize(
+            model,
+            model_in,
+            model_out,
+            config,
+            ops,
+            fused,
+            tokenizer_path,
+            calibration_texts,
+        )
+    finally:
+        for path in temp:
+            path.unlink(missing_ok=True)
+
+
+def _quantize(
+    model: Any,
+    model_in: Path,
+    model_out: Path,
+    config: QuantConfig,
+    ops: list[str],
+    fused: bool,
+    tokenizer_path: str | Path | None,
+    calibration_texts: Sequence[str] | None,
+) -> QuantResult:
+    import onnx
+    from onnxruntime.quantization import QuantType, quantize_dynamic
+
     if fused:
         ops.append("Attention")
         if not any(o.domain == "com.microsoft" for o in model.opset_import):
@@ -328,7 +374,10 @@ def _smooth(model: Any, stats: dict[str, np.ndarray], alpha: float) -> None:
         weight.CopyFrom(
             numpy_helper.from_array((w * s[:, None]).astype(np.float32), weight.name)
         )
-        inv_name = f"{node.name}_smooth_scale"
+        # Named as the projection's MatMul so that quantising from the raw
+        # export or from a chunked fused graph writes identical data files.
+        stem = node.name if node.op_type == "MatMul" else f"{node.name}/MatMul"
+        inv_name = f"{stem}_smooth_scale"
         model.graph.initializer.append(
             numpy_helper.from_array((1.0 / s).astype(np.float32), inv_name)
         )
@@ -607,7 +656,7 @@ def _quantize_rowwise(
     zero_point: bool = True,
     keep_fp32: tuple[str, ...] = (),
     attention_chunk: int = ATTENTION_CHUNK,
-    layer_loop: bool = True,
+    layer_loop: bool = False,
     matmul_integer: bool = False,
     signed_weights: bool = False,
 ) -> None:
@@ -745,8 +794,9 @@ def _quantize_rowwise(
         elif node.op_type == "Attention" and node.domain == "com.microsoft":
             x, w_name, bias, mask = node.input[:4]
             heads = next(a.i for a in node.attribute if a.name == "num_heads")
-            prefix = f"rowwise/{node.name}"
-            new_nodes.extend(rowwise_matmul(prefix, x, w_name, f"{prefix}/qkv"))
+            prefix = f"rowwise/{node.name}"  # the Loop's prefix
+            qkv = rowwise_matmul(f"{prefix}/MatMul", x, w_name, f"{prefix}/qkv")
+            new_nodes.extend(qkv)
             new_nodes.append(
                 helper.make_node(
                     "Split",

@@ -49,12 +49,13 @@ docker run --rm --platform linux/arm64 -v $PWD:/src:ro python:3.12-slim sh -c \
    git tag -a v0.5.0 -m v0.5.0 && git push origin v0.5.0
    ```
 4. Upload the model assets the new `hub.py` points at (deterministic builds,
-   compare the printed digests first). Run `gh` inside the repository: leaving
+   compare the printed digests first; `quantize` builds from `model.onnx`
+   and the weight file only changes when the recipe does). Run `gh` inside the repository: leaving
    it unloads the direnv-provided `GH_TOKEN`.
    ```bash
    bge-m3-lite fuse        # model_fused.onnx + model_fused.onnx_data (hub.FUSED_FILES)
    bge-m3-lite quantize    # model_int8.onnx + model_int8.onnx_data (hub.INT8_FILES)
-   gh release upload v0.5.0 -R allen2c/bge-m3-lite ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx_data
+   gh release upload v0.5.2 -R allen2c/bge-m3-lite ~/.cache/bge-m3-lite/BAAI--bge-m3/model_fused.onnx ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx
    ```
    Until the upload finishes, fresh installs of that version cannot download
    the asset. Unchanged assets stay on their old release (per-file URLs);

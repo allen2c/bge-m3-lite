@@ -35,7 +35,11 @@ Ships as `model_int8.onnx` (graph, 0.7 MB) + `model_int8.onnx_data` (weights,
 569 MiB; fp32: 2.27 GB) since v0.5: external data halves the resident memory
 (`../resources.md`). Deterministic on a given machine (the calibration
 statistics are fp32 activations, so other CPUs give a different digest, see
-`measurements.md`); `hub.INT8_FILES` pins the M4 build.
+`measurements.md`); `hub.INT8_FILES` pins the M4 build. The shipped fused
+graph carries the attention `Loop` (with the layer tail inside since v0.5.2),
+which would hide the projections from calibration, so `quantize` rebuilds an
+unchunked fused graph from `model.onnx` in memory first (v0.5.2; the weight
+file is byte-identical to the v0.5.0 one, only the graph changed).
 
 ```bash
 pip install "bge-m3-lite[quant]"       # onnx, onnx-ir, sympy (build time only)
@@ -85,6 +89,9 @@ bge-m3-lite quantize --method dynamic --raw --no-smooth           # v0.0.2 recip
 bge-m3-lite quantize --calibration my_texts.txt                   # own calibration set
 bge-m3-lite quantize --keep-fp32 'layer\.23/' --keep-fp32 'Attention_23$'  # last layer fp32
 bge-m3-lite quantize --attention-chunk 0                          # single MultiHeadAttention per layer
+bge-m3-lite quantize --layer-loop                                 # FFN inside the Loop too (fp32 layout; costs memory here)
+bge-m3-lite quantize --matmul-integer                             # v3 kernel path: MatMulInteger + Cast + Mul
+bge-m3-lite quantize --signed-weights                             # u8·s8 (VNNI/AMX operand order; wrong on AVX2)
 uv run tools/eval_model.py path/to/model.onnx                     # accuracy + speed report
 ```
 

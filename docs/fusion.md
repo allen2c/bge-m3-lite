@@ -34,7 +34,10 @@ weights `[1024, 3072]` and biases. The release therefore holds two small files
 | `model_fused.onnx_data` | 288 MiB | the 48 merged QKV tensors |
 
 Both live in the cache next to `model.onnx_data`, which is why the fp32
-download (2.3 GB) is still needed. `BGE_M3_LITE_FUSED_URL` overrides the base
+download (2.3 GB) is still needed. Since v0.4 every `Attention` is rewritten
+into `MatMul` + `Split` + a `Loop` over query chunks, and since v0.5.2 the
+rest of the layer runs inside that loop as well (`memory.md`); the outputs
+are unchanged and the data file is the one from v0.3.0. `BGE_M3_LITE_FUSED_URL` overrides the base
 URL of the two assets.
 
 ```bash

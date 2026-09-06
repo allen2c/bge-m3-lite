@@ -39,9 +39,10 @@ dropped. Outputs are bit-identical to the unchunked graph (dense, sparse and
 ColBERT on a mixed-length padded batch; the fp32 fixtures still match
 FlagEmbedding exactly).
 
-`--attention-chunk N` on `fuse` and `quantize` sets the chunk (default 512;
-`0` restores the single op). At 512 the per-layer buffer for an 8192-token
-text is `16 × 512 × 8192 × 4 B` = 256 MiB.
+`--attention-chunk N` on `fuse` and `quantize` sets the chunk (512 in
+v0.4–v0.5.1, 256 since v0.5.2; `0` restores the single op). At 256 the
+per-layer score buffer for an 8192-token text is `16 × 256 × 8192 × 4 B` =
+128 MiB.
 
 ## What still costs memory
 
@@ -49,25 +50,46 @@ text is `16 × 512 × 8192 × 4 B` = 256 MiB.
   touched); int8 loads its 569 MB file fully, plus ORT's arena for the
   2 700-node graph (1.8 GB resident after loading).
 - Hidden states and FFN intermediates: `padded_tokens × 4 KiB` and
-  `padded_tokens × 16 KiB` per layer, i.e. 160 MiB at 8192 tokens.
+  `padded_tokens × 16 KiB` per layer, i.e. 160 MiB at 8192 tokens (v0.5.2
+  bounds the FFN part to `batch × chunk × 16 KiB`, below).
 - `encode(..., max_batch_tokens=16384)` still bounds the padded tokens per
   batch; lower it on small machines.
 
-## Activation memory per padded token (M4, v0.5.1, one `encode` call)
+## v0.5.2: the whole layer inside the `Loop` (M4, one `encode`, peak − RSS after load)
 
-Peak RSS minus RSS after load, `max_batch_tokens` = tokens × texts:
+`fuse` now moves the rest of each layer (output projection, SkipLayerNorm,
+FFN, SkipLayerNorm; all per token) into the attention `Loop` body, slicing the
+residual like the query rows (`quantize.layer_tail_into_loop`; `fuse
+--no-layer-loop` keeps the v0.4 layout, `quantize --layer-loop` applies it to
+int8). Outputs are bit-identical (dense, sparse, ColBERT; fp32 and int8),
+16/128-token batches within ±1 %, 512-token texts −4 % (two iterations of
+256), one 8192-token text +10 % wall.
 
-| batch | tokens | int8 | fp32 fused |
-|---|---|---|---|
-| 1024 × 1 | 1024 | +91 MiB | +108 MiB |
-| 8192 × 1 | 8192 | +704 MiB (86 KiB/tok) | +840 MiB (103 KiB/tok) |
-| 1024 × 8 | 8192 | +628 MiB | +767 MiB |
-| 1024 × 16 | 16384 | +1246 MiB | +1528 MiB |
-| 512 × 32 | 16384 | +1752 MiB (107 KiB/tok) | +2001 MiB (122 KiB/tok) |
+What actually sets the peak: onnxruntime's memory pattern only applies from the
+second run of a shape; the first run of a new shape allocates from the BFC
+arena, which grows in powers of two (1 + 32 + 32 + 64 + 128 + 256 + 512 MiB
+for one 8192-token text) and never shrinks (`memory.enable_memory_arena_shrinkage`
+and `kSameAsRequested` measured: no gain, or worse). So the per-token cost is
+the arena's high-water mark, not the sum of live buffers, and it moves with the
+allocation *sequence*: the same rewrite at chunk 512 costs +15–23 %, at chunk 256
+it saves a third for texts longer than the chunk.
 
-Rule of thumb: **peak ≈ RSS after load + 0.09–0.12 MiB × padded tokens per
-batch**; the default `max_batch_tokens=16384` therefore needs 1.3–2 GB of
-headroom, and a budget of `H` MiB allows `max_batch_tokens ≈ H / 0.12`. The
-ORT arena keeps the largest buffer set, so the peak is reached once and
-stays. Roughly a third of the per-token cost is the FFN intermediate
-(2 × 16 KiB), the target of the planned v0.5.2 token-block FFN.
+| tokens × texts | fp32 v0.5.1 (chunk 512) | fp32 v0.5.2 (256, tail in loop) | int8 v0.5.1 | int8 v0.5.2 (256) | int8 256 + tail in loop |
+|---|---|---|---|---|---|
+| 1024 × 1 | 104 MiB (104 KiB/tok) | 72 (72) | | | |
+| 8192 × 1 | 835 (104) | 567 (71) | 690 (86) | 637 (80) | 716 (90) |
+| 2048 × 4 | 766 (96) | 512 (64) | | | |
+| 1024 × 16 | 1526 (95) | 1025 (64) | 1233 (77) | 1150 (72) | 1309 (82) |
+| 512 × 32 | 1997 (125) | 1197 (75) | 1739 (109) | 1162 (73) | 1385 (87) |
+| 256 × 64 | 1443 (90) | 1731 (108) | 1192 (74) | 1192 (74) | 1479 (92) |
+| 128 × 128 | 1442 (90) | 1731 (108) | | | |
+
+Texts no longer than the chunk (one iteration) pay for the extra copies the
+loop makes of the hidden state (residual slice, accumulator, loop output):
++20 % for fp32. The int8 graph (30 small ops per projection) loses with the
+tail inside the loop at every shape, so int8 ships chunk 256 without it
+(start-up would drop from 0.75 s to 0.35 s with it; 512-token texts −3 %).
+Rule of thumb since v0.5.2: **peak ≈ RSS after load + 0.11 MiB × padded tokens
+per batch** for short texts, **0.07–0.08 MiB** for texts of 512+ tokens; a
+budget of `H` MiB allows `max_batch_tokens ≈ H / 0.11`. The arena keeps the
+largest buffer set, so the peak is reached once and stays.

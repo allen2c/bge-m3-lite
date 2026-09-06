@@ -92,3 +92,18 @@ private memory (113 MB physical footprint after queries), int8 in 0.63 s /
 throughput −5 %, single short queries 2× slower. Disabling the arena was
 measured and rejected: it returns no memory after a long request and costs
 100–200 MiB more.
+
+## v0.5.2 — activation memory (done)
+
+`fuse` moves the whole layer tail into the attention `Loop` and the chunk is
+256 (`../memory.md`): fp32 peak per padded token 0.10–0.125 → 0.064–0.075
+MiB for texts of 512+ tokens (−30–40 %), +20 % for batches of texts no longer
+than the chunk; int8 ships chunk 256 without the tail (−7–33 %, the loop
+costs memory there). Bit-identical outputs, ±1 % on 16/128-token batches,
+−4 % at 512 tokens. `quantize` rebuilds the unchunked fused graph from
+`model.onnx` in memory, so the int8 weight file is unchanged since v0.5.0
+and `--attention-chunk` / `--layer-loop` take effect. Lesson: onnxruntime's
+memory pattern never applies to the first run of a shape; the BFC arena grows
+in powers of two, and the peak follows the allocation sequence, so every
+layout change must be measured (`kSameAsRequested`, shrinkage, chunk 512 +
+loop all lost).

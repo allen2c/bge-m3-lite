@@ -536,7 +536,9 @@ def test_rowwise_layer_tail_in_loop():
     ref = np.asarray(
         ort.InferenceSession(model.SerializeToString()).run(None, feeds)[0]
     )
-    _quantize_rowwise(model, quantize_embeddings=False, attention_chunk=4)
+    _quantize_rowwise(
+        model, quantize_embeddings=False, attention_chunk=4, layer_loop=True
+    )
     outer = [n.op_type for n in model.graph.node]
     assert "SkipLayerNormalization" not in outer
     assert outer.count("MatMulIntegerToFloat") == 2  # the two QKV projections

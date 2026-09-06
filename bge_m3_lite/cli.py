@@ -52,7 +52,7 @@ def _cmd_quantize(args: argparse.Namespace) -> int:
         matmul_integer=args.matmul_integer,
         signed_weights=args.signed_weights,
         attention_chunk=args.attention_chunk,
-        layer_loop=not args.no_layer_loop,
+        layer_loop=args.layer_loop,
         keep_fp32=tuple(args.keep_fp32 or ()),
     )
     texts = load_calibration_texts(args.calibration) if args.calibration else None
@@ -209,9 +209,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="query rows per attention pass (0 = whole sequence)",
     )
     q.add_argument(
-        "--no-layer-loop",
+        "--layer-loop",
         action="store_true",
-        help="keep the output projection and FFN outside the attention Loop",
+        help="output projection and FFN inside the attention Loop (fp32 default; "
+        "costs memory with the int8 graph, docs/memory.md)",
     )
     q.add_argument(
         "--symmetric",

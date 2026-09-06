@@ -78,17 +78,18 @@ ALL_FILES = TOKENIZER_FILES + HEAD_FILES + MODEL_FILES
 # its weights as external data (docs/resources.md). Hosted as GitHub release
 # assets; override the base URL with BGE_M3_LITE_INT8_URL or build the pair
 # locally into the cache.
-INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.5.0"
+INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.5.2"
+INT8_DATA_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.5.0"
 INT8_FILES: tuple[RemoteFile, ...] = (
     RemoteFile(
         "model_int8.onnx",
         f"{INT8_RELEASE}/model_int8.onnx",
-        728012,
-        "387d42ddd3934a59963d0e36c1dc11e7391e97218d188469038225101d06f71d",
+        741755,
+        "e99b993f9dff29c6d4d3af5c2cc84fdba2501a5fbab424c486337cbbfb002166",
     ),
     RemoteFile(
         "model_int8.onnx_data",
-        f"{INT8_RELEASE}/model_int8.onnx_data",
+        f"{INT8_DATA_RELEASE}/model_int8.onnx_data",
         596474496,
         "fc5e602311d45c6419eda09620ba9c5991efe311578b5e4f59f810c2d118bfd8",
     ),
@@ -99,14 +100,14 @@ INT8_FILES: tuple[RemoteFile, ...] = (
 # weights in ``model.onnx_data`` by offset; only the merged QKV projections
 # live in ``model_fused.onnx_data``. Override the base URL with
 # BGE_M3_LITE_FUSED_URL.
-FUSED_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.4.0"
+FUSED_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.5.2"
 FUSED_DATA_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.3.0"
 FUSED_FILES: tuple[RemoteFile, ...] = (
     RemoteFile(  # v0.4.0: attention in query chunks (docs/memory.md)
         "model_fused.onnx",
         f"{FUSED_RELEASE}/model_fused.onnx",
-        200374,
-        "c62186175b77d56da98792819ad5586671b9afba483c45cf679a4ea732d121ea",
+        200659,
+        "46590995e501c642eadecce9c8db0128fcf805a6b11e61af4db9007e064a18ab",
     ),
     RemoteFile(  # unchanged since v0.2.0: the merged QKV weights
         "model_fused.onnx_data",

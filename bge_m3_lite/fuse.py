@@ -91,8 +91,9 @@ def fuse(
     *,
     attention_chunk: int = ATTENTION_CHUNK,
     layer_loop: bool = True,
+    basename: str = "model_fused",
 ) -> FuseResult:
-    """Write ``model_fused.onnx`` + ``model_fused.onnx_data`` next to ``model_in``
+    """Write ``<basename>.onnx`` + ``<basename>.onnx_data`` next to ``model_in``
     (or into ``out_dir``) and return sizes and digests. Deterministic."""
     try:
         import onnx
@@ -107,8 +108,8 @@ def fuse(
     model_in = Path(model_in)
     out_dir = model_in.parent if out_dir is None else Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    graph_path = out_dir / "model_fused.onnx"
-    data_path = out_dir / "model_fused.onnx_data"
+    graph_path = out_dir / f"{basename}.onnx"
+    data_path = out_dir / f"{basename}.onnx_data"
 
     # Content -> (offset, length) of every tensor stored in the shared data file.
     original = onnx.load(str(model_in), load_external_data=False)

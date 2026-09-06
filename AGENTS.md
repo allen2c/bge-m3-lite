@@ -33,9 +33,9 @@ BGE_M3_LITE_RUN_SLOW=1 uv run pytest -m slow    # full model, 2.3 GB cache
 | `quantization/recipe.md` | int8 backbone: SmoothQuant + row-wise scheme, variants |
 | `quantization/measurements.md` | int8 accuracy and speed per platform |
 | `calibration.md` | calibration texts (sources, licence), held-out evaluation set |
-| `memory.md` | attention in query chunks; activation memory per padded token, `max_batch_tokens` budget |
+| `memory.md` | attention `Loop` (chunk 256, layer tail inside since v0.5.2); activation memory per padded token, `max_batch_tokens` budget |
 | `resources.md` | resident memory, CPU-seconds per token, threads, idle CPU, `low_memory` (v0.5) |
 | `verification.md` | accuracy, platforms, throughput, start-up, memory |
 | `development.md` | fixtures, CI bench inputs, release and asset upload |
 | `roadmap/done.md` | shipped versions and the facts behind them |
-| `roadmap/next.md` | open items: v0.5.2 activation memory, int8 on Xeon VNNI |
+| `roadmap/next.md` | open items: int8 on Xeon VNNI, short-batch memory, v0.6 candidates |
