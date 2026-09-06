@@ -52,3 +52,22 @@ text is `16 × 512 × 8192 × 4 B` = 256 MiB.
   `padded_tokens × 16 KiB` per layer, i.e. 160 MiB at 8192 tokens.
 - `encode(..., max_batch_tokens=16384)` still bounds the padded tokens per
   batch; lower it on small machines.
+
+## Activation memory per padded token (M4, v0.5.1, one `encode` call)
+
+Peak RSS minus RSS after load, `max_batch_tokens` = tokens × texts:
+
+| batch | tokens | int8 | fp32 fused |
+|---|---|---|---|
+| 1024 × 1 | 1024 | +91 MiB | +108 MiB |
+| 8192 × 1 | 8192 | +704 MiB (86 KiB/tok) | +840 MiB (103 KiB/tok) |
+| 1024 × 8 | 8192 | +628 MiB | +767 MiB |
+| 1024 × 16 | 16384 | +1246 MiB | +1528 MiB |
+| 512 × 32 | 16384 | +1752 MiB (107 KiB/tok) | +2001 MiB (122 KiB/tok) |
+
+Rule of thumb: **peak ≈ RSS after load + 0.09–0.12 MiB × padded tokens per
+batch**; the default `max_batch_tokens=16384` therefore needs 1.3–2 GB of
+headroom, and a budget of `H` MiB allows `max_batch_tokens ≈ H / 0.12`. The
+ORT arena keeps the largest buffer set, so the peak is reached once and
+stays. Roughly a third of the per-token cost is the FFN intermediate
+(2 × 16 KiB), the target of the planned v0.5.2 token-block FFN.

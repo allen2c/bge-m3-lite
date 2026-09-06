@@ -22,11 +22,15 @@ Shipped versions and the facts behind them: `done.md`.
 
 ## v0.5.x — resource efficiency (v0.5.0 and v0.5.1 shipped, see `done.md` and `../resources.md`)
 
-- **v0.5.2** — activation memory: FFN intermediates (`padded_tokens ×
-  16 KiB` per layer) in token blocks inside the existing `Loop`, and
-  `max_batch_tokens` guidance per RSS budget; measure whether the arena
-  shrink run option (`memory.enable_memory_arena_shrinkage`, no effect in
-  the first test) can return memory between requests.
+- **v0.5.2** — activation memory: measured 0.09–0.12 MiB per padded token
+  (`../memory.md`, guidance for `max_batch_tokens` per RSS budget is there).
+  Move the per-token tail of each layer (output projection, SkipLayerNorm,
+  FFN, SkipLayerNorm) into the attention `Loop` body so the FFN
+  intermediates are `chunk × 16 KiB` instead of `padded_tokens × 16 KiB`;
+  must stay bit-exact and within 3 % on short inputs. Measure whether the
+  arena shrink run option (`memory.enable_memory_arena_shrinkage`, no
+  effect in the first test) can return memory between requests (disabling
+  the arena does not, `../resources.md`).
 - Physical-core detection on Linux/Windows if the CI matrix shows that
   onnxruntime's default (0) is not the physical core count there.
 - **v0.6 (candidates)** — weight-only int8 `MatMulNBits` for Apple Silicon
