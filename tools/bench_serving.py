@@ -11,7 +11,9 @@ client, CPU-seconds per request, the worst event-loop stall while requests run
 (a coroutine ticks every 10 ms) and peak RSS. Modes: sequential calls in the
 main thread; `asyncio.to_thread(emb.encode, q)` at each concurrency, with a
 closed loop of that many clients (a client sends its next request as soon as
-the previous one returns, like `wrk`); `encode(list)` in batches of several
+the previous one returns, like `wrk`); `session.run_async` at each concurrency
+(tokenizer and heads on the loop thread, the run posted to onnxruntime's own
+pool and awaited through a future); `encode(list)` in batches of several
 sizes (every request waits for the whole batch); `AsyncEmbedder` with its
 default `max_concurrency`, batching off and with the window (docs/serving/recipe.md);
 the same for passages (`--passage-tokens`, the 128 default is the 158-token
@@ -36,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # for eval_model helpe
 
 from eval_model import os_threads, peak_rss_mib, rss_mib  # noqa: E402
 
-from bge_m3_lite.embedder import BGEM3Embedder  # noqa: E402
+from bge_m3_lite.embedder import BGEM3Embedder, _normalize  # noqa: E402
 from bge_m3_lite.serving import AsyncEmbedder  # noqa: E402
 
 QUERY = "What is the capital of France?"  # 9 tokens
@@ -67,6 +69,33 @@ class Loop:
 
 
 Client = Callable[[str], object] | Callable[[str], Awaitable[object]]
+
+
+def run_async_client(emb: BGEM3Embedder) -> Callable[[str], Awaitable[object]]:
+    """``encode`` of one text with ``session.run_async``: tokenizer, padding
+    and the dense head run on the loop thread, the backbone in onnxruntime's
+    intra-op pool, which calls back from one of its threads."""
+    session = emb.backbone.session
+    assert session is not None
+    names = [emb.backbone.OUTPUT]
+
+    async def encode(text: str) -> object:
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[list] = loop.create_future()
+        ids, mask = emb._pad(emb.tokenize([text]), emb.tokenizer.PAD_ID)
+        feed = {emb.backbone.INPUT_IDS: ids, emb.backbone.ATTENTION_MASK: mask}
+
+        def done(results: list, _user_data: object, err: str) -> None:
+            if err:
+                loop.call_soon_threadsafe(fut.set_exception, RuntimeError(err))
+            else:
+                loop.call_soon_threadsafe(fut.set_result, results)
+
+        session.run_async(names, feed, done, None)
+        hidden = (await fut)[0]
+        return _normalize(hidden[:, 0, :])
+
+    return encode
 
 
 async def closed_loop(texts: list[str], clients: list[Client]) -> Result:
@@ -151,6 +180,11 @@ class Bench:
         label = f"{name} to_thread ×{concurrency}"
         if len(embs) > 1:
             label += f", {len(embs)} sessions"
+        self.report(label, len(texts), lambda: asyncio.run(closed_loop(texts, clients)))
+
+    def run_async(self, name: str, texts: list[str], concurrency: int) -> None:
+        clients: list[Client] = [run_async_client(self.embedders[0])] * concurrency
+        label = f"{name} run_async ×{concurrency}"
         self.report(label, len(texts), lambda: asyncio.run(closed_loop(texts, clients)))
 
     def served(
@@ -267,6 +301,8 @@ def main() -> int:
     for c in concurrency:
         bench.concurrent("query", queries, c)
     if len(embedders) == 1:
+        for c in concurrency:
+            bench.run_async("query", queries, c)
         for b in sorted({4, 8, 16, args.queries}):
             if b <= args.queries:
                 bench.batched("query", queries, b)
@@ -277,6 +313,8 @@ def main() -> int:
     for c in concurrency:
         bench.concurrent("passage", passages, c)
     if len(embedders) == 1:
+        for c in concurrency:
+            bench.run_async("passage", passages, c)
         bench.batched("passage", passages, args.passages)
         bench.served("passage", passages, 4, 0)
         bench.served("passage", passages, 4, args.batch_window_ms)
