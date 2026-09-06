@@ -63,7 +63,8 @@ residual like the query rows (`quantize.layer_tail_into_loop`; `fuse
 --no-layer-loop` keeps the v0.4 layout, `quantize --layer-loop` applies it to
 int8). Outputs are bit-identical (dense, sparse, ColBERT; fp32 and int8),
 16/128-token batches within ±1 %, 512-token texts −4 % (two iterations of
-256), one 8192-token text +10 % wall.
+256), one 8192-token text +10 % wall. CI runners agree (128-token tok/s, v0.5.1
+→ v0.5.2 graph): EPYC 7763 269 → 268, Neoverse-N2 317 → 312, M1 VM 339 → 364.
 
 What actually sets the peak: onnxruntime's memory pattern only applies from the
 second run of a shape; the first run of a new shape allocates from the BFC

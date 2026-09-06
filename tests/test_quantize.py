@@ -529,3 +529,17 @@ def test_rowwise_layer_tail_in_loop():
     valid = feeds["mask"].astype(bool)
     rel = np.abs(out - ref)[valid].max() / np.abs(ref)[valid].max()
     assert rel < 0.05
+
+
+def test_has_contrib_ops_looks_inside_loop_bodies():
+    pytest.importorskip("onnx")
+    import numpy as np
+
+    from bge_m3_lite.fuse import _chunk_attention
+    from bge_m3_lite.quantize import has_contrib_ops
+
+    model = _two_layer_model(np.random.default_rng(8), 1, 5, 8, 2)
+    assert has_contrib_ops(model.graph)
+    _chunk_attention(model, 4)  # every contrib op is now inside a Loop body
+    assert all(n.domain != "com.microsoft" for n in model.graph.node)
+    assert has_contrib_ops(model.graph)

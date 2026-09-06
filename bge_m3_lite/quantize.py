@@ -127,7 +127,7 @@ def quantize(
     # quantizer needs the domain declared and a default tensor type, and it
     # turns ``Attention`` into ``QAttention``.
     model = onnx.load(str(model_in))
-    fused = any(n.domain == "com.microsoft" for n in model.graph.node)
+    fused = has_contrib_ops(model.graph)
     temp: list[Path] = []
     if fused and any(n.op_type == "Loop" for n in model.graph.node):
         from bge_m3_lite.fuse import fuse
@@ -236,6 +236,17 @@ def _quantize(
         data_path.stat().st_size,
         sha256(data_path),
     )
+
+
+def has_contrib_ops(graph: Any) -> bool:
+    """True if ``graph`` (or a ``Loop`` body in it) uses ``com.microsoft`` ops:
+    the fused graph, whose contrib ops all sit inside the loops since v0.5.2."""
+    for node in graph.node:
+        if node.domain == "com.microsoft":
+            return True
+        if any(a.name == "body" and has_contrib_ops(a.g) for a in node.attribute):
+            return True
+    return False
 
 
 def sha256(path: Path) -> str:

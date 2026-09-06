@@ -85,7 +85,7 @@ INT8_FILES: tuple[RemoteFile, ...] = (
         "model_int8.onnx",
         f"{INT8_RELEASE}/model_int8.onnx",
         741755,
-        "e99b993f9dff29c6d4d3af5c2cc84fdba2501a5fbab424c486337cbbfb002166",
+        "aabe2436389867e4814e43df2daad166ea2f71c47f14b734e674e1cefa9ad9c6",
     ),
     RemoteFile(
         "model_int8.onnx_data",
