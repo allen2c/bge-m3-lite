@@ -91,7 +91,26 @@ the swapped tokens is 0.001–0.009, the same size as the int8 noise
 (`--keep-fp32 REGEX` keeps chosen projections in fp32 for such experiments;
 none of the cheap variants above moves sparse accuracy beyond ±1 text).
 
-## Measured on GitHub-hosted runners (4 vCPU, `tools/eval_model.py`, 2026-09-06, v0.3.1 recipe)
+## v0.4 recipe on GitHub-hosted runners (4 vCPU, `tools/eval_model.py`, 2026-09-06)
+
+| runner | graph | dense min / mean (11 / held-out) | sparse top-5 (11 / held-out) | 128-tok tok/s |
+|---|---|---|---|---|
+| AMD EPYC 7763 (AVX2) | fp32 fused, chunked | 1.0 | 11/11, 40/40 | 263 |
+| | int8 v3 (v0.3.1) | 0.9983 / 0.9979 | 8/11, 29/40 | 346 |
+| | **int8 v4** | **0.9982 / 0.9971** | **9/11, 29/40** | **368** (376 with `--attention-chunk 0`) |
+| | int8 v4 `--symmetric` | 0.9969 / 0.9961 | 9/11, 26/40 | 383 |
+| Neoverse-N2 | fp32 fused, chunked | 1.0 | 11/11, 40/40 | 314 |
+| | int8 v3 | 0.9977 / 0.9974 | 10/11, 28/40 | 1103 |
+| | **int8 v4** | **0.9981 / 0.9978** | **7/11, 29/40** | **1117** (1134 unchunked) |
+| macOS VM (Apple M1, 3 vCPU) | fp32 fused, chunked | 1.0 | 11/11, 40/40 | 142 |
+| | int8 v3 | 0.9976 / 0.9973 | 9/11, 28/40 | 344 |
+| | **int8 v4** | **0.9981 / 0.9978** | **8/11, 24/40** | **411** |
+
+The Xeon (VNNI) runner was not drawn in these runs; its v0.3.1 numbers are
+below. Sparse top-5 counts move by ±3 between platforms and recipes for the
+same dense cosine: they are the near-ties described above, not a trend.
+
+## v0.3.1 recipe on GitHub-hosted runners (4 vCPU, `tools/eval_model.py`, 2026-09-06)
 
 | runner | variant | dense cos min / mean | sparse top-5 same | colbert p5 | 128-tok tok/s |
 |---|---|---|---|---|---|

@@ -77,12 +77,12 @@ ALL_FILES = TOKENIZER_FILES + HEAD_FILES + MODEL_FILES
 # built by ``bge-m3-lite quantize``, see docs/quantization.md). Hosted
 # as a GitHub release asset; override the URL with BGE_M3_LITE_INT8_URL or
 # build it locally into the cache.
-INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.3.1"
+INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.4.0"
 INT8_FILE = RemoteFile(
     "model_int8.onnx",
     f"{INT8_RELEASE}/model_int8.onnx",
-    597151197,
-    "d87b5cc0b0953c5336eebe3bce99cf3c55683edb9fe321fa6fdec73425d864e4",
+    597159304,
+    "1d4814dcfda27ae96244067b17b7137c392e984a8aa09ba0471ca5964052c0c8",
 )
 
 # Fused fp32 backbone (Attention / SkipLayerNorm / BiasGelu contrib ops, built by
@@ -90,17 +90,18 @@ INT8_FILE = RemoteFile(
 # weights in ``model.onnx_data`` by offset; only the merged QKV projections
 # live in ``model_fused.onnx_data``. Override the base URL with
 # BGE_M3_LITE_FUSED_URL.
-FUSED_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.3.0"
+FUSED_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.4.0"
+FUSED_DATA_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.3.0"
 FUSED_FILES: tuple[RemoteFile, ...] = (
-    RemoteFile(
+    RemoteFile(  # v0.4.0: attention in query chunks (docs/memory.md)
         "model_fused.onnx",
         f"{FUSED_RELEASE}/model_fused.onnx",
-        158733,
-        "113d3c707e0578387a6da8f33621f78d4d17fd8bca7327674a3cb41bb215d417",
+        200374,
+        "c62186175b77d56da98792819ad5586671b9afba483c45cf679a4ea732d121ea",
     ),
-    RemoteFile(
+    RemoteFile(  # unchanged since v0.2.0: the merged QKV weights
         "model_fused.onnx_data",
-        f"{FUSED_RELEASE}/model_fused.onnx_data",
+        f"{FUSED_DATA_RELEASE}/model_fused.onnx_data",
         302284800,
         "d90723fed1af6a11089cbed0e0ae148366c502a8475a6cf22a5aa69d466c84e5",
     ),

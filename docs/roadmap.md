@@ -59,24 +59,23 @@ step is gated by the fixtures in `tests/fixtures/` staying green.
 
 ## v0.4.0 — memory, int8 speed, evaluation (in progress)
 
-Everything below is implemented and measured on the M4 (2026-09-06); the
-release waits for one CI `bench` run (`fuse_local` + default `quantize`) to
-confirm the x86/ARM numbers, then new `model_fused.*` and `model_int8.onnx`
-assets are pinned.
+Measured on the M4 and on the CI matrix (2026-09-06, `quantization.md`,
+`memory.md`); ships new `model_fused.onnx` (graph only, the data file is
+unchanged) and `model_int8.onnx` assets.
 
 | goal | result |
 |---|---|
 | long inputs must not need 4 GiB | attention in query chunks (`Loop`, 512 rows): 8192 tokens 7.4 GB → 2.5 GB, bit-exact, ≤ 3 % on short inputs (`memory.md`) |
-| int8 element-wise overhead | per-axis `QuantizeLinear` + `MatMulIntegerToFloat`: +11 % on the M4, same accuracy; the ORT-fusable per-tensor form is out of reach (per-row zero point unsupported), `--symmetric` gets closer but loses accuracy (`quantization.md`) |
+| int8 element-wise overhead | per-axis `QuantizeLinear` + `MatMulIntegerToFloat`: +11 % on the M4, +6–9 % on EPYC (AVX2), +19 % on the macOS VM, +1–3 % on Neoverse (GEMM-bound); same accuracy. The ORT-fusable per-tensor form is out of reach (per-row zero point unsupported); `--symmetric` gets closer but loses accuracy (`quantization.md`) |
 | sparse int8 accuracy | measured, not fixed: the flips are fp32 near-ties (gap 0.001–0.009); last-layer-fp32 variants change ±1 text, so the recipe stays; `--keep-fp32` remains for experiments |
 | calibration provenance | 212 hand-written + 360 MIRACL passages, licence and recipe in `calibration.md`; 40-text held-out set disjoint from calibration, reported by `tools/eval_model.py` |
 | engineering | `hub.py` retries 429/5xx/timeouts with back-off; the CI `bench` summary prints the CPU model and one accuracy + tok/s row per graph |
 
 ## v0.4.x candidates (measure first)
 
-- x86 numbers for v0.4 from the bench matrix; if the Xeon gain is below
-  +20 %, profile the remaining scalar ops (`ReduceMax/ReduceMin` are two
-  extra passes; `MaxPool`-style fused min/max does not exist in ORT).
+- Xeon (VNNI) numbers for v0.4: both bench runs drew the EPYC runner.
+  If the gain there is also below +20 %, profile the remaining scalar ops
+  (`ReduceMax/ReduceMin` are two extra passes over the input).
 - `attention_chunk` per platform: 512 was chosen on the M4; the CI matrix
   may prefer 1024 (fewer iterations) on 4-vCPU runners.
 - Start-up of the int8 graph (1.1 s vs 0.4 s fp32): 2 700 nodes cost ORT
