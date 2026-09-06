@@ -38,4 +38,5 @@ BGE_M3_LITE_RUN_SLOW=1 uv run pytest -m slow    # full model, 2.3 GB cache
 | `verification.md` | accuracy, platforms, throughput, start-up, memory |
 | `development.md` | fixtures, CI bench inputs, release and asset upload |
 | `roadmap/done.md` | shipped versions and the facts behind them |
-| `roadmap/next.md` | open items: short-batch memory, int8 node count, v0.6 candidates |
+| `roadmap/next.md` | open items: v0.6 asyncio serving (numbers), short-batch memory, int8 node count |
+| `roadmap/async.md` | the v0.6 plan: `AsyncEmbedder`, micro-batching, FastAPI recipe, bench, acceptance criteria |
