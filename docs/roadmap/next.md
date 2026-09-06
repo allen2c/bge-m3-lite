@@ -18,6 +18,10 @@ short-batch memory, int8 start-up); nothing is scheduled.
 - int8 start-up: the graph optimisation level does not matter (0.67–0.72 s
   at every level for 2 700 nodes); the row `Loop` halves the outer node
   count and the time, so the scalar scale / zero-point chain stays as it is.
+  256-row windows are the optimum on every runner (64 / 128 / 1024 lose
+  8–20 % on int8); the remaining −2–9 % of int8 batch throughput on the
+  runners is the price of the 0.31 s start-up and −10 % memory
+  (`quantize --tail none` buys it back).
 - int8 on Xeon (VNNI): v4 is 0.84× fp32 on 128-token batches, short queries
   still 2× faster; one x86 recipe (u8·u8), no per-CPU assets
   (`../quantization/measurements.md`).

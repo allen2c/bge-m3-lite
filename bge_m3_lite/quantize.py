@@ -40,7 +40,7 @@ ATTENTION_CHUNK = 256  # see docs/memory.md (512 before v0.5.2)
 # Loop over TAIL_ROWS rows of the flattened batch (v0.6.1), inside the
 # attention Loop (v0.5.2), or on the whole padded batch (docs/memory.md).
 Tail = Literal["rows", "loop", "none"]
-TAIL_ROWS = {"fp32": 256, "int8": 1024}  # int8 pays per op per iteration
+TAIL_ROWS = {"fp32": 256, "int8": 256}  # measured optimum on every runner
 SMOOTH_TARGETS = (  # node-name patterns of the projections to smooth (fused graph)
     r"^Attention_\d+(/MatMul)?$",  # merged QKV projection (chunked: its MatMul)
     r"attention/output/dense/MatMul$",

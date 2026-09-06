@@ -41,7 +41,8 @@ which would hide the projections from calibration, so `quantize` rebuilds an
 unchunked fused graph from `model.onnx` in memory first (v0.5.2). The weight
 file is byte-identical to the v0.5.0 one; v0.6.1 changed the graph only
 (`--tail rows`, `../memory.md`: the session opens in 0.31 s instead of
-0.69 s on the M4, −10 % activation memory, bit-identical outputs).
+0.69 s on the M4, −10 % activation memory, bit-identical outputs, −2–9 %
+128-token throughput on the CI runners at the same short-query latency).
 
 ```bash
 pip install "bge-m3-lite[quant]"       # onnx, onnx-ir, sympy (build time only)
@@ -91,7 +92,7 @@ bge-m3-lite quantize --method dynamic --raw --no-smooth           # v0.0.2 recip
 bge-m3-lite quantize --calibration my_texts.txt                   # own calibration set
 bge-m3-lite quantize --keep-fp32 'layer\.23/' --keep-fp32 'Attention_23$'  # last layer fp32
 bge-m3-lite quantize --attention-chunk 0                          # single MultiHeadAttention per layer
-bge-m3-lite quantize --tail loop|none                             # layer tail inside the attention Loop (v0.5.2) or on the whole batch
+bge-m3-lite quantize --tail loop|none --tail-rows 256             # layer tail inside the attention Loop (v0.5.2) / whole batch; window size
 uv run tools/eval_model.py path/to/model.onnx                     # accuracy + speed report
 ```
 

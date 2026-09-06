@@ -97,9 +97,16 @@ int8; the int8 weight file is unchanged since v0.5.0).
 | 8192 × 1 | 570 (71) | 540 (68) | 648 (81) | 584 (73) |
 | 128 × 16 | 220 (110) | 120 (60) | 161 (80) | 145 (72) |
 
-Throughput is unchanged within noise on every shape (M4: 128 × 128 2072 →
-2142 tok/s fp32; 8192 × 1 345 → 343; int8 1369 → 1306 / 314 → 314), CI
-runners in `verification.md`. Start-up: the int8 outer graph shrinks from
+Throughput on the M4 is unchanged within noise on every shape (128 × 128
+2072 → 2142 tok/s fp32; 8192 × 1 345 → 343; int8 1369 → 1306 / 314 → 314).
+CI runners (128-token batches, built on the runner): fp32 −2–3 % (EPYC 7763
+270 → 264, Neoverse-N2 316 → 306); int8 −2–9 % (Neoverse 1146 → 1039, Xeon
+8573C 488 → 477, M1 VM 911 → 918) at unchanged short-query latency; 256
+rows is the optimum there (`--tail-rows`: 64 / 128 / 1024 rows lose 8–20 %
+on int8, the window's intermediates leave the L2 either way; fp32 64 rows
+−13 % on the M4; peak memory is the same for every window). `quantize
+--tail none` restores the v0.5.2 int8 throughput at 0.7 s start-up and
++10 % memory. Start-up: the int8 outer graph shrinks from
 2 692 to 1 396 nodes and the session opens in 0.31 s instead of 0.69 s on
 the M4 (fp32 0.32 s either way, `resources.md`). Rule of thumb since
 v0.6.1: **peak ≈ RSS after load + 0.06–0.07 MiB × padded tokens per batch**
