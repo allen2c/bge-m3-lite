@@ -1,6 +1,6 @@
 """Compare any backbone ONNX file against the FlagEmbedding fixtures and time it.
 
-Usage:  uv run tools/eval_model.py [MODEL.onnx ...]   (default: cached fp32 model)
+Usage:  uv run tools/eval_model.py [--low-memory] [MODEL.onnx ...]   (default: cached fp32 model)
 
 Besides accuracy and tok/s it reports what docs/resources.md tracks: resident
 memory after loading and at the peak, CPU-seconds per 1 000 tokens, and the
@@ -86,6 +86,7 @@ def os_threads() -> int:
 
 def idle_cpu_ms_per_s(seconds: float = 1.0) -> float:
     """CPU time the process burns while nothing runs (onnxruntime spinning)."""
+    time.sleep(0.5)  # let the run's tail (thread hand-off, page reclaim) settle
     cpu0 = time.process_time()
     time.sleep(seconds)
     return (time.process_time() - cpu0) / seconds * 1000
@@ -133,18 +134,20 @@ def _report_sparse_colbert(
     )
 
 
-def evaluate(model_path: Path, *, heldout: bool = True) -> None:
+def evaluate(
+    model_path: Path, *, heldout: bool = True, low_memory: bool = False
+) -> None:
     ref = json.loads((FIXTURES / "embeddings_ref.json").read_text(encoding="utf-8"))
     npz = np.load(FIXTURES / "embeddings_ref.npz")
     t0 = time.perf_counter()
-    emb = BGEM3Embedder(quiet=True, model_path=model_path)
+    emb = BGEM3Embedder(quiet=True, model_path=model_path, low_memory=low_memory)
     assert emb.backbone.session is not None
     size = model_path.stat().st_size
     data = model_path.with_name(model_path.name + "_data")
     if data.exists():
         size += data.stat().st_size
     print(
-        f"\n== {model_path} ({size / 2**20:.0f} MiB) "
+        f"\n== {model_path} ({size / 2**20:.0f} MiB){' low-memory' if low_memory else ''} "
         f"session {time.perf_counter() - t0:.2f}s rss {rss_mib():.0f} MiB "
         f"threads {emb.backbone.session.get_session_options().intra_op_num_threads} "
         f"os-threads {os_threads()}"
@@ -202,11 +205,15 @@ def evaluate(model_path: Path, *, heldout: bool = True) -> None:
 
 
 if __name__ == "__main__":
-    paths = [Path(p) for p in sys.argv[1:]] or [hub.default_cache_dir() / "model.onnx"]
+    argv = sys.argv[1:]
+    low = "--low-memory" in argv
+    argv = [a for a in argv if a != "--low-memory"]
+    paths = [Path(p) for p in argv] or [hub.default_cache_dir() / "model.onnx"]
     if len(paths) == 1:
-        evaluate(paths[0])
+        evaluate(paths[0], low_memory=low)
     else:  # one process per model, so RSS and thread counts are not inherited
         import subprocess
 
         for p in paths:
-            subprocess.run([sys.executable, __file__, str(p)], check=True)
+            cmd = [sys.executable, __file__, str(p)] + (["--low-memory"] if low else [])
+            subprocess.run(cmd, check=True)

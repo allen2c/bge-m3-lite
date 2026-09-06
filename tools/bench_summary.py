@@ -30,13 +30,15 @@ def parse(log: str) -> list[dict[str, str]]:
     for line in log.splitlines():
         if m := re.match(r"##### (.*)", line):
             variant = m.group(1).strip()
-        elif m := re.match(r"== (\S+) \((\d+) MiB\)(.*)", line):
+        elif m := re.match(r"== (\S+) \((\d+) MiB\)( low-memory)?(.*)", line):
             name = Path(m.group(1)).name
             if variant:
                 name = variant
                 variant = ""
+            if m.group(3):
+                name += " low-memory"
             rows.append({"model": f"`{name}` ({m.group(2)} MiB)"})
-            if s := re.search(r"session (\S+)s rss (\d+) MiB", m.group(3)):
+            if s := re.search(r"session (\S+)s rss (\d+) MiB", m.group(4)):
                 rows[-1]["start-up s"] = s.group(1)
                 rows[-1]["rss load/peak MiB"] = s.group(2)
         elif not rows:

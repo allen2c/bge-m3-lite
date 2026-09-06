@@ -86,6 +86,7 @@ jobs:
           cd ~/.cache/bge-m3-lite/BAAI--bge-m3
           files="model.onnx model_fused.onnx"; [ -f model_int8.onnx ] && files="$files model_int8.onnx"
           uv run --project "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/eval_model.py" $files | tee "$RUNNER_TEMP/eval.log"
+          uv run --project "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/eval_model.py" --low-memory ${files#model.onnx } | tee -a "$RUNNER_TEMP/eval.log"
       - name: fuse (local build)
         if: ${{ inputs.fuse_local }}
         shell: bash

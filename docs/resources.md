@@ -53,15 +53,32 @@ are < 4 % of the CPU time; the rest is the backbone.
 | v0.5 default | 0.38 s | 1283 MiB | 1554 MiB | 2392 MiB | 2143 | 1.73 | 20 / 71 ms | 0 |
 | int8 v0.5 default | 0.75 s | 724 MiB | 935 MiB | 1679 MiB | 1582 | 2.32 | 11 / 29 ms | 0 |
 
-## Not enabled: no prepacking (planned `low_memory`, v0.5.1)
+## `low_memory=True` (v0.5.1): weights stay in the mapped file
 
-`session.disable_prepacking=1` leaves the weights in the mapped file
-(reclaimable pages) instead of MLAS's packed copies: fp32 starts in 0.11 s
-with 140 MiB resident, int8 in 0.61 s with 149 MiB; batch throughput is
-unchanged (2091 / 1536 tok/s) because packing is amortised, but every
-short query packs B again: 40 / 21 ms wall, 150 / 67 ms CPU (2×). Right for
-serverless and one-shot CLI use, wrong for a resident service. Disabling the
-arena as well changes nothing on load and costs 140 MiB after a batch.
+`BGEM3Embedder(low_memory=True)` / `encode --low-memory` sets
+`session.disable_prepacking=1`: MLAS does not build its packed copy of every
+weight, so the weights are served from the mmapped `.onnx_data` files
+(M4, v0.5 defaults otherwise):
+
+| backbone | mode | start-up | private memory after load | 128 × 16 tok/s | short query wall / CPU |
+|---|---|---|---|---|---|
+| fp32 fused | default | 0.38 s | 1283 MiB | 2143 | 20 / 71 ms |
+| fp32 fused | low_memory | **0.11 s** | **140 MiB** (113 MB `phys_footprint` after queries) | 2038 | 41 / 152 ms |
+| int8 | default | 0.75 s | 724 MiB | 1582 | 11 / 29 ms |
+| int8 | low_memory | **0.63 s** | **149 MiB** | 1505 | 21 / 68 ms |
+
+The weight pages then show up in RSS once touched (fp32: 1.3 GB, int8:
+450 MiB) but they are file-backed: shared between processes through the page
+cache (two processes at 1.3 GB RSS each added 0.5 MB of file-backed pages to
+the system) and reclaimable under pressure. Batch throughput is unchanged
+because packing is amortised; every *short* query packs B again, hence 2×
+the latency and CPU. Right for serverless, one-shot CLI calls and many
+one-thread workers on one machine; wrong for a resident service answering
+single queries.
+
+Not done: disabling the arena. It does not return memory after a long
+request (RSS after a 4096-token text stays at 903 MiB int8 / 1778 fp32
+versus 704 / 1614 with the arena) and makes nothing faster.
 
 ## GitHub-hosted runners (CI `bench`, 4 vCPU, v0.5.0 defaults, 2026-09-06)
 

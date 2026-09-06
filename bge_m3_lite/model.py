@@ -49,13 +49,17 @@ def session_options(
     *,
     inter_op_threads: int | None = None,
     spin: bool | None = None,
+    low_memory: bool = False,
 ) -> Any:
     """``ort.SessionOptions`` for the backbone.
 
     ``spin=None`` reads ``BGE_M3_LITE_SPIN`` (default off): onnxruntime's
     worker threads otherwise keep spinning after every run, which costs
     ~60 ms of CPU per idle second and 30–40 % of a short query's CPU time
-    for 0–5 % throughput (docs/resources.md).
+    for 0–5 % throughput. ``low_memory`` skips MLAS weight prepacking: the
+    weights stay in the mapped model file (start-up in 0.1–0.6 s, tens of
+    MiB private memory, pages shared between processes and reclaimable),
+    at 2× the cost of a single short query (docs/resources.md).
     """
     import onnxruntime as ort
 
@@ -72,6 +76,8 @@ def session_options(
     opts.add_session_config_entry(
         "session.intra_op.allow_spinning", "1" if spin else "0"
     )
+    if low_memory:
+        opts.add_session_config_entry("session.disable_prepacking", "1")
     return opts
 
 
@@ -89,11 +95,15 @@ class OnnxBackbone:
         num_threads: int | None = None,
         inter_op_threads: int | None = None,
         spin: bool | None = None,
+        low_memory: bool = False,
     ) -> None:
         import onnxruntime as ort
 
         opts = session_options(
-            num_threads, inter_op_threads=inter_op_threads, spin=spin
+            num_threads,
+            inter_op_threads=inter_op_threads,
+            spin=spin,
+            low_memory=low_memory,
         )
         # resolve(): ORT validates that external data files (model.onnx_data)
         # stay inside the model's directory, comparing *real* paths — a

@@ -17,4 +17,6 @@ def test_encode_flags():
     args = build_parser().parse_args(["encode", "--max-batch-tokens", "4096", "x"])
     assert args.max_batch_tokens == 4096 and not args.raw
     assert build_parser().parse_args(["encode", "--raw", "x"]).raw
+    assert not args.low_memory
+    assert build_parser().parse_args(["encode", "--low-memory", "x"]).low_memory
     assert build_parser().parse_args(["fuse"]).output is None

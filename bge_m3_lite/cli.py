@@ -97,6 +97,7 @@ def _cmd_encode(args: argparse.Namespace) -> int:
         precision="int8" if args.int8 else "fp32",
         fused=not args.raw,
         model_path=args.model,
+        low_memory=args.low_memory,
     )
     out = embedder.encode(
         texts,
@@ -162,6 +163,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--raw", action="store_true", help="fp32 without the fused graph (slower)"
     )
     enc.add_argument("--model", default=None, help="path to a custom backbone .onnx")
+    enc.add_argument(
+        "--low-memory",
+        action="store_true",
+        help="no weight prepacking: fast start-up, weights stay file-backed",
+    )
     enc.set_defaults(func=_cmd_encode)
     q = sub.add_parser(
         "quantize",

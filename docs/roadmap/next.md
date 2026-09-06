@@ -20,12 +20,8 @@ Shipped versions and the facts behind them: `done.md`.
   session time; folding the scalar scale/zero-point chain into fewer ops
   would also help here.
 
-## v0.5.x — resource efficiency (v0.5.0 shipped, see `done.md` and `../resources.md`)
+## v0.5.x — resource efficiency (v0.5.0 and v0.5.1 shipped, see `done.md` and `../resources.md`)
 
-- **v0.5.1** — `BGEM3Embedder(low_memory=True)`: no prepacking, arena off,
-  for serverless / CLI one-shot use (measured on the M4: start-up 0.11 s fp32
-  / 0.61 s int8, 140–150 MiB resident, short queries 2× slower); `--low-memory`
-  on the CLI.
 - **v0.5.2** — activation memory: FFN intermediates (`padded_tokens ×
   16 KiB` per layer) in token blocks inside the existing `Loop`, and
   `max_batch_tokens` guidance per RSS budget; measure whether the arena

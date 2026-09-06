@@ -2,5 +2,5 @@
 
 from bge_m3_lite.embedder import BGEM3Embedder
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 __all__ = ["BGEM3Embedder", "__version__"]

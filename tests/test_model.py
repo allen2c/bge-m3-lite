@@ -26,6 +26,10 @@ def test_session_options_defaults(monkeypatch):
     assert opts.intra_op_num_threads == 3
     assert opts.get_session_config_entry("session.intra_op.allow_spinning") == "1"
     assert m.session_options(2).intra_op_num_threads == 2
+    with pytest.raises(RuntimeError):  # not set unless low_memory
+        opts.get_session_config_entry("session.disable_prepacking")
+    low = m.session_options(low_memory=True)
+    assert low.get_session_config_entry("session.disable_prepacking") == "1"
 
 
 def _tiny_backbone(onnx, rng):

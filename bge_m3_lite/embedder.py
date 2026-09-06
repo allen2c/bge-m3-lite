@@ -42,6 +42,7 @@ class BGEM3Embedder:
         query_max_length: int = QUERY_MAX_LENGTH,
         passage_max_length: int | None = None,
         spin: bool | None = None,
+        low_memory: bool = False,
     ) -> None:
         """``precision="int8"`` uses the quantised backbone (see docs/quantization/);
         ``fused=False`` runs the raw Hub export instead of the fused fp32 graph
@@ -56,7 +57,10 @@ class BGEM3Embedder:
         to onnxruntime's choice (physical cores) elsewhere; ``spin`` keeps the
         worker threads spinning between runs (off by default, see
         docs/resources.md). Both can also be set with ``BGE_M3_LITE_THREADS``
-        and ``BGE_M3_LITE_SPIN=1``.
+        and ``BGE_M3_LITE_SPIN=1``. ``low_memory=True`` keeps the weights in
+        the mapped model file instead of prepacked copies: fast start-up and
+        tens of MiB of private memory for one-shot or serverless use, at
+        about twice the latency of a single short query.
         """
         files = hub.ensure_files(
             hub.TOKENIZER_FILES + hub.HEAD_FILES, cache_dir, quiet=quiet
@@ -76,7 +80,9 @@ class BGEM3Embedder:
         self.precision = precision
         self.fused = fused and precision == "fp32" and model_path is None
         self.tokenizer = XLMRobertaTokenizer.from_file(files["sentencepiece.bpe.model"])
-        self.backbone = OnnxBackbone(backbone_path, num_threads=num_threads, spin=spin)
+        self.backbone = OnnxBackbone(
+            backbone_path, num_threads=num_threads, spin=spin, low_memory=low_memory
+        )
         self.max_length = max_length
         self.query_max_length = query_max_length
         self.passage_max_length = (

@@ -56,6 +56,10 @@ tokens (default 16384), so mixing short and 8192-token inputs stays within
 memory.
 `BGEM3Embedder(precision="int8")` loads a 4× smaller quantised backbone
 (see `docs/quantization/` for the accuracy trade-off).
+`BGEM3Embedder(low_memory=True)` starts in 0.1–0.6 s with ~140 MiB of private
+memory (weights stay in the mapped file, shared between processes) at twice
+the latency of a single short query: for serverless and one-shot use
+(`docs/resources.md`).
 
 ### CLI
 
@@ -63,6 +67,7 @@ memory.
 bge-m3-lite download                     # pre-fetch the model files (2.3 GB + 288 MB fused)
 bge-m3-lite info                         # cache state
 echo "hello" | bge-m3-lite encode --sparse --colbert --tokens
+bge-m3-lite encode --low-memory --int8 "one-shot"   # fast start, small footprint
 ```
 
 ### Environment variables
