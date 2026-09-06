@@ -50,7 +50,7 @@ def _cmd_quantize(args: argparse.Namespace) -> int:
         smooth_alpha=None if args.no_smooth else args.alpha,
         symmetric=args.symmetric,
         attention_chunk=args.attention_chunk,
-        layer_loop=args.layer_loop,
+        tail=args.tail,
         keep_fp32=tuple(args.keep_fp32 or ()),
     )
     texts = load_calibration_texts(args.calibration) if args.calibration else None
@@ -78,7 +78,7 @@ def _cmd_fuse(args: argparse.Namespace) -> int:
         files["model.onnx"],
         args.output,
         attention_chunk=args.attention_chunk,
-        layer_loop=not args.no_layer_loop,
+        tail=args.tail,
     )
     out = args.output or files["model.onnx"].parent
     for name, size, digest in (
@@ -207,10 +207,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="query rows per attention pass (0 = whole sequence)",
     )
     q.add_argument(
-        "--layer-loop",
-        action="store_true",
-        help="output projection and FFN inside the attention Loop (fp32 default; "
-        "costs memory with the int8 graph, docs/memory.md)",
+        "--tail",
+        choices=["rows", "loop", "none"],
+        default="rows",
+        help="where the output projection and FFN run: a Loop over rows of the "
+        "flattened batch (default), inside the attention Loop (v0.5.2), or on "
+        "the whole batch (docs/memory.md)",
     )
     q.add_argument(
         "--symmetric",
@@ -239,9 +241,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="query rows per attention pass (0 = whole sequence, ORT Attention op)",
     )
     f.add_argument(
-        "--no-layer-loop",
-        action="store_true",
-        help="keep the output projection and FFN outside the attention Loop",
+        "--tail",
+        choices=["rows", "loop", "none"],
+        default="rows",
+        help="where the output projection and FFN run: a Loop over rows of the "
+        "flattened batch (default), inside the attention Loop (v0.5.2), or on "
+        "the whole batch (docs/memory.md)",
     )
     f.set_defaults(func=_cmd_fuse)
     return parser

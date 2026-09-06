@@ -17,7 +17,10 @@ pool and awaited through a future); `encode(list)` in batches of several
 sizes (every request waits for the whole batch); `AsyncEmbedder` with its
 default `max_concurrency`, batching off and with the window (docs/serving/recipe.md);
 the same for passages (`--passage-tokens`, the 128 default is the 158-token
-text of `eval_model.py`); and, with `--sessions N`, N sessions of
+text of `eval_model.py`); bursts of that many queries through `AsyncEmbedder`
+alone and together with one `--mixed-tokens` passage (the token-aware
+batcher must keep the queries out of the passage's batch: their latency in
+the mixed burst is the number to compare); and, with `--sessions N`, N sessions of
 ``threads / N`` intra-op threads each, one client per session. Peak RSS is
 cumulative (`ru_maxrss`), so run one shape per process to isolate it.
 """
@@ -28,6 +31,7 @@ import argparse
 import asyncio
 import inspect
 import os
+import re
 import sys
 import time
 from collections.abc import Awaitable, Callable
@@ -143,12 +147,17 @@ def timed(fn: Callable[[list[float]], None]) -> Result:
 
 
 class Bench:
-    def __init__(self, embedders: list[BGEM3Embedder], repeat: int) -> None:
+    def __init__(
+        self, embedders: list[BGEM3Embedder], repeat: int, only: str | None = None
+    ) -> None:
         self.embedders = embedders
         self.repeat = repeat
+        self.only = only
 
     def report(self, mode: str, n: int, run: Callable[[], Result]) -> None:
         """Run ``run`` ``repeat`` times and print the last result as a row."""
+        if self.only and not re.search(self.only, mode):
+            return
         result = run()
         for _ in range(self.repeat - 1):
             result = run()
@@ -206,6 +215,36 @@ class Bench:
             label += f", window {window_ms:g} ms"
         self.report(label, len(texts), lambda: asyncio.run(run()))
 
+    def burst(self, name: str, texts: list[str], size: int, extra: str | None) -> None:
+        """Bursts of ``size`` texts (plus ``extra``, whose latency is not
+        counted) sent at once through ``AsyncEmbedder`` with its default
+        window; the next burst starts when the whole previous one is done."""
+
+        async def one(served: AsyncEmbedder, text: str, latencies: list[float]):
+            t = time.perf_counter()
+            await served.encode(text)
+            latencies.append(time.perf_counter() - t)
+
+        async def run() -> Result:
+            latencies: list[float] = []
+            ignored: list[float] = []
+            ticker = Loop()
+            tick_task = asyncio.create_task(ticker.run())
+            async with AsyncEmbedder(self.embedders[0]) as served:
+                t0, cpu0 = time.perf_counter(), time.process_time()
+                for i in range(0, len(texts), size):
+                    calls = [one(served, t, latencies) for t in texts[i : i + size]]
+                    if extra is not None:
+                        calls.append(one(served, extra, ignored))
+                    await asyncio.gather(*calls)
+                wall, cpu = time.perf_counter() - t0, time.process_time() - cpu0
+            tick_task.cancel()
+            await tick_task
+            return latencies, wall, cpu, ticker.max_lag_ms
+
+        label = f"{name} burst ×{size}" + (" + passage" if extra else "")
+        self.report(label, len(texts), lambda: asyncio.run(run()))
+
     def batched(self, name: str, texts: list[str], batch: int) -> None:
         """``encode`` on ``batch`` texts at a time: the micro-batcher's view,
         every request in a batch waits for the batch."""
@@ -248,6 +287,13 @@ def main() -> int:
     ap.add_argument(
         "--repeat", type=int, default=2, help="runs per mode, the last one is reported"
     )
+    ap.add_argument(
+        "--mixed-tokens",
+        type=int,
+        default=600,
+        help="length of the passage sent along with each query burst",
+    )
+    ap.add_argument("--only", help="regular expression: run only the matching rows")
     ap.add_argument("--low-memory", action="store_true")
     ap.add_argument(
         "--batch-window-ms",
@@ -287,11 +333,13 @@ def main() -> int:
     passage = SENTENCE * (args.passage_tokens * 12 // 128)  # same text as eval_model
     passages = [passage] * args.passages
     ntok = len(first.tokenize([passage])[0])
-    for emb in embedders:  # warm up: memory patterns for both shapes
+    mixed = SENTENCE * (args.mixed_tokens // 10)
+    for emb in embedders:  # warm up: memory patterns for every shape
         emb.encode(QUERY)
         emb.encode(passage)
+        emb.encode(mixed)
 
-    bench = Bench(embedders, args.repeat)
+    bench = Bench(embedders, args.repeat, args.only)
     print(
         "| mode | req/s | p50 ms | p95 ms | cpu ms/req | loop lag max ms | peak rss MiB |"
     )
@@ -309,6 +357,10 @@ def main() -> int:
         for c in concurrency:
             bench.served("query", queries, c, 0)
             bench.served("query", queries, c, args.batch_window_ms)
+        for c in concurrency:
+            if c > 1:
+                bench.burst("query", queries, c, None)
+                bench.burst("query", queries, c, mixed)
         bench.sequential("passage", passages)
     for c in concurrency:
         bench.concurrent("passage", passages, c)
@@ -320,7 +372,8 @@ def main() -> int:
         bench.served("passage", passages, 4, args.batch_window_ms)
     print(
         f"\n(query = {args.queries} × 9-token texts, passage = {args.passages} × "
-        f"{ntok}-token texts; latency as seen by a closed-loop client; loop lag = "
+        f"{ntok}-token texts, burst passage {len(first.tokenize([mixed])[0])} tokens; "
+        f"latency as seen by a closed-loop client; loop lag = "
         f"worst delay of a 10 ms ticking coroutine; peak rss = ru_maxrss so far)"
     )
     return 0

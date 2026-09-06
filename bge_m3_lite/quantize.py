@@ -36,6 +36,10 @@ CALIBRATION_EXTRA = Path(__file__).with_name(
     "calibration_miracl.txt"
 )  # docs/calibration.md
 ATTENTION_CHUNK = 256  # see docs/memory.md (512 before v0.5.2)
+# Where the per-token tail of a layer (output projection, FFN) runs: a second
+# Loop over ATTENTION_CHUNK rows of the flattened batch (v0.6.1), inside the
+# attention Loop (v0.5.2), or on the whole padded batch (docs/memory.md).
+Tail = Literal["rows", "loop", "none"]
 SMOOTH_TARGETS = (  # node-name patterns of the projections to smooth (fused graph)
     r"^Attention_\d+(/MatMul)?$",  # merged QKV projection (chunked: its MatMul)
     r"attention/output/dense/MatMul$",
@@ -69,9 +73,7 @@ class QuantConfig:
     calibration_max_length: int = 512
     symmetric: bool = False  # rowwise: fixed zero point 128 instead of per-row
     attention_chunk: int = ATTENTION_CHUNK  # query rows per attention pass, 0 = off
-    layer_loop: bool = (
-        False  # layer tail inside the attention Loop: fp32 only (memory.md)
-    )
+    tail: Tail = "rows"  # where the layer tail runs (docs/memory.md)
     # node-name regexes whose MatMul / Attention stay fp32 (experiments)
     keep_fp32: tuple[str, ...] = ()
 
@@ -129,7 +131,7 @@ def quantize(
     model = onnx.load(str(model_in))
     fused = has_contrib_ops(model.graph)
     temp: list[Path] = []
-    if fused and any(n.op_type == "Loop" for n in model.graph.node):
+    if fused and any(n.op_type == "Loop" for n in model.graph.node):  # chunked
         from bge_m3_lite.fuse import fuse
 
         base = f".fused-{os.getpid()}"
@@ -193,7 +195,7 @@ def _quantize(
             zero_point=not config.symmetric,
             keep_fp32=config.keep_fp32,
             attention_chunk=config.attention_chunk,
-            layer_loop=config.layer_loop,
+            tail=config.tail,
         )
     elif config.method == "dynamic":
         tmp = model_out.with_name(model_out.name + ".tmp")
@@ -239,12 +241,16 @@ def _quantize(
 
 
 def has_contrib_ops(graph: Any) -> bool:
-    """True if ``graph`` (or a ``Loop`` body in it) uses ``com.microsoft`` ops:
-    the fused graph, whose contrib ops all sit inside the loops since v0.5.2."""
+    """True if ``graph`` (or a ``Loop`` body / ``If`` branch in it) uses
+    ``com.microsoft`` ops: the fused graph, whose contrib ops all sit inside
+    the loops since v0.5.2."""
     for node in graph.node:
         if node.domain == "com.microsoft":
             return True
-        if any(a.name == "body" and has_contrib_ops(a.g) for a in node.attribute):
+        if any(
+            a.name in ("body", "then_branch", "else_branch") and has_contrib_ops(a.g)
+            for a in node.attribute
+        ):
             return True
     return False
 
@@ -558,19 +564,69 @@ def attention_nodes(
     return nodes, inits
 
 
-def layer_tail_into_loop(model: Any) -> int:
-    """Move the per-token tail of every layer into its attention ``Loop``.
-
-    After :func:`attention_nodes` a layer reads ``Loop -> output projection ->
+def _layer_tail(
+    nodes: list[Any], li: int, consts: set[str], graph: Any
+) -> tuple[list[int], str, str] | None:
+    """``(tail node indices, residual, final)`` of the per-token chain rooted
+    at the attention ``Loop`` ``nodes[li]``: output projection ->
     SkipLayerNormalization -> FFN in -> BiasGelu -> FFN out ->
-    SkipLayerNormalization``; every op after the ``Loop`` is per token, so the
-    same chain on ``chunk`` rows inside the body is exact and its intermediates
-    (the FFN's ``rows x 4096`` above all) shrink from the padded batch to one
-    chunk (docs/memory.md). The residual input of the first
-    SkipLayerNormalization (the layer input) is sliced like the query rows;
-    the nodes are otherwise moved verbatim. Returns the number of loops
-    rewritten; a graph without the expected chain (int8 ``keep_fp32``
-    ``Attention`` layers, ``--attention-chunk 0``) is left alone.
+    SkipLayerNormalization, every node reading only constants, the chain and
+    one outer tensor (the residual, i.e. the layer input). ``None`` when the
+    graph does not have that shape (int8 ``keep_fp32`` ``Attention`` layers,
+    an intermediate used elsewhere)."""
+    loop = nodes[li]
+    out = loop.output[0]
+    tail: list[int] = []
+    avail, residual, lns = {out}, None, 0
+    for j in range(li + 1, len(nodes)):
+        node = nodes[j]
+        for name in node.input:
+            if not name or name in consts or name in avail:
+                continue
+            if residual in (None, name):
+                residual = name
+            else:  # not a per-token chain rooted at this loop
+                return None
+        tail.append(j)
+        avail.update(node.output)
+        if node.op_type == "SkipLayerNormalization":
+            lns += 1
+            if lns == 2:
+                break
+    first_ln = next(
+        (nodes[j] for j in tail if nodes[j].op_type == "SkipLayerNormalization"),
+        None,
+    )
+    if lns != 2 or first_ln is None or residual != first_ln.input[1]:
+        return None
+    final = nodes[tail[-1]].output[0]
+    inner = avail - {final}
+    used_outside = {o.name for o in graph.output}
+    for k, n in enumerate(nodes):
+        if k not in tail:
+            used_outside.update(n.input)
+    if used_outside & inner:
+        return None  # an intermediate is used elsewhere (extra graph outputs)
+    return tail, str(residual), final
+
+
+def _copy_renamed(node: Any, rename: dict[str, str]) -> Any:
+    copy = type(node)()
+    copy.CopyFrom(node)
+    for k, name in enumerate(copy.input):
+        copy.input[k] = rename.get(name, name)
+    for k, name in enumerate(copy.output):
+        copy.output[k] = rename.get(name, name)
+    return copy
+
+
+def layer_tail_into_loop(model: Any) -> int:
+    """Move the per-token tail of every layer into its attention ``Loop``
+    (v0.5.2 layout, ``fuse --tail loop``; see :func:`layer_tail_row_loop`).
+
+    The residual input of the first SkipLayerNormalization (the layer input)
+    is sliced like the query rows; the nodes are otherwise moved verbatim.
+    Returns the number of loops rewritten.
     """
     from onnx import helper
 
@@ -582,44 +638,12 @@ def layer_tail_into_loop(model: Any) -> int:
     for li, loop in enumerate(nodes):
         if loop.op_type != "Loop" or not loop.name.endswith("/loop"):
             continue
+        found = _layer_tail(nodes, li, consts, graph)
+        if found is None:
+            continue
+        tail, residual, final = found
         p = loop.name[: -len("/loop")]
         out = loop.output[0]
-        tail, avail, residual, lns = [], {out}, None, 0
-        for j in range(li + 1, len(nodes)):
-            node = nodes[j]
-            for name in node.input:
-                if not name or name in consts or name in avail:
-                    continue
-                if residual in (None, name):
-                    residual = name
-                else:  # not a per-token chain rooted at this loop
-                    residual = None
-                    tail = []
-                    break
-            else:
-                tail.append(j)
-                avail.update(node.output)
-                if node.op_type == "SkipLayerNormalization":
-                    lns += 1
-                    if lns == 2:
-                        break
-                continue
-            break
-        first_ln = next(
-            (nodes[j] for j in tail if nodes[j].op_type == "SkipLayerNormalization"),
-            None,
-        )
-        if lns != 2 or first_ln is None or residual != first_ln.input[1]:
-            continue
-        residual = str(residual)
-        final = nodes[tail[-1]].output[0]
-        inner = avail - {final}
-        used_outside = {o.name for o in graph.output}
-        for k, n in enumerate(nodes):
-            if k not in tail:
-                used_outside.update(n.input)
-        if used_outside & inner:
-            continue  # an intermediate is used elsewhere (extra graph outputs)
         body = next(a.g for a in loop.attribute if a.name == "body")
         body_nodes = [n for n in body.node if n.op_type not in ("Concat", "Identity")]
         rename = {out: f"{p}/oc", residual: f"{p}/xc", final: f"{p}/layer_out"}
@@ -630,14 +654,7 @@ def layer_tail_into_loop(model: Any) -> int:
                 [f"{p}/xc"],
             )
         )
-        for j in tail:
-            node = type(nodes[j])()
-            node.CopyFrom(nodes[j])
-            for k, name in enumerate(node.input):
-                node.input[k] = rename.get(name, name)
-            for k, name in enumerate(node.output):
-                node.output[k] = rename.get(name, name)
-            body_nodes.append(node)
+        body_nodes += [_copy_renamed(nodes[j], rename) for j in tail]
         body_nodes += [
             helper.make_node(
                 "Concat", [f"{p}/acc", f"{p}/layer_out"], [f"{p}/acc_next"], axis=1
@@ -656,6 +673,155 @@ def layer_tail_into_loop(model: Any) -> int:
     return rewritten
 
 
+def layer_tail_row_loop(model: Any, rows: int = ATTENTION_CHUNK) -> int:
+    """Run the per-token tail of every layer in a second ``Loop`` over
+    ``rows`` rows of the flattened ``(1, batch x seq, hidden)`` activations.
+
+    The tail (see :func:`_layer_tail`) is per token, so its intermediates
+    (the FFN's ``rows x 4096`` above all) are bounded by ``rows`` whatever the
+    batch shape, unlike inside the attention ``Loop`` where a batch of short
+    texts still runs the tail on ``batch x seq`` rows (docs/memory.md). The
+    body's result is a scan output (one buffer, no accumulator copies), which
+    needs every iteration to produce the same shape: the last window is
+    shifted back to ``rows`` full rows (the tail recomputes up to ``rows - 1``
+    rows), and the outer graph reassembles the ``batch x seq`` rows from the
+    windows. Returns the number of layers rewritten.
+    """
+    import onnx
+    from onnx import helper, numpy_helper
+
+    graph = model.graph
+    nodes = list(graph.node)
+    consts = {t.name for t in graph.initializer}
+    hidden = next(  # the LayerNorm gamma of any layer tail
+        (
+            int(t.dims[0])
+            for n in nodes
+            if n.op_type == "SkipLayerNormalization"
+            for t in graph.initializer
+            if t.name == n.input[2]
+        ),
+        None,
+    )
+    if hidden is None:
+        return 0
+    inits: list[Any] = []
+
+    def c64(name: str, values: list[int]) -> str:
+        if name not in consts:
+            inits.append(
+                numpy_helper.from_array(np.array(values, dtype=np.int64), name)
+            )
+            consts.add(name)
+        return name
+
+    mk = helper.make_node
+    c_rows = c64("tail/rows", [rows])
+    c_rows1 = c64("tail/rows-1", [rows - 1])
+    c_flat = c64("tail/flat", [1, -1, hidden])
+    c_0, c_1, c_2 = c64("tail/0", [0]), c64("tail/1", [1]), c64("tail/2", [2])
+    if "tail/true" not in consts:
+        inits.append(numpy_helper.from_array(np.array(True), "tail/true"))
+        consts.add("tail/true")
+    replaced: dict[int, list[Any]] = {}
+    moved: set[int] = set()
+    for li, loop in enumerate(nodes):
+        if loop.op_type != "Loop" or not loop.name.endswith("/loop"):
+            continue
+        found = _layer_tail(nodes, li, consts, graph)
+        if found is None:
+            continue
+        tail, residual, final = found
+        p = loop.name[: -len("/loop")] + "/tail"
+        out = loop.output[0]
+        rename = {out: f"{p}/oc", residual: f"{p}/xc", final: f"{p}/layer_out"}
+        body = helper.make_graph(
+            [
+                mk("Unsqueeze", [f"{p}/i", c_0], [f"{p}/i1"]),
+                mk("Mul", [f"{p}/i1", c_rows], [f"{p}/start0"]),
+                mk("Min", [f"{p}/start0", f"{p}/last"], [f"{p}/start"]),
+                mk("Add", [f"{p}/start", f"{p}/W"], [f"{p}/end"]),
+                mk("Slice", [f"{p}/out2d", f"{p}/start", f"{p}/end", c_1], [f"{p}/oc"]),
+                mk("Slice", [f"{p}/x2d", f"{p}/start", f"{p}/end", c_1], [f"{p}/xc"]),
+                *(_copy_renamed(nodes[j], rename) for j in tail),
+                mk("Identity", [f"{p}/cond"], [f"{p}/cond_next"]),
+            ],
+            f"{p}/body",
+            [
+                helper.make_tensor_value_info(f"{p}/i", onnx.TensorProto.INT64, []),
+                helper.make_tensor_value_info(f"{p}/cond", onnx.TensorProto.BOOL, []),
+            ],
+            [
+                helper.make_tensor_value_info(
+                    f"{p}/cond_next", onnx.TensorProto.BOOL, []
+                ),
+                helper.make_tensor_value_info(
+                    f"{p}/layer_out", onnx.TensorProto.FLOAT, None
+                ),
+            ],
+        )
+        replaced[li] = [
+            loop,
+            mk("Shape", [out], [f"{p}/shape"]),
+            mk("Reshape", [out, c_flat], [f"{p}/out2d"]),
+            mk("Reshape", [residual, c_flat], [f"{p}/x2d"]),
+            mk("Shape", [f"{p}/out2d"], [f"{p}/shape2d"]),
+            mk("Slice", [f"{p}/shape2d", c_1, c_2], [f"{p}/M"]),
+            mk("Min", [f"{p}/M", c_rows], [f"{p}/W"]),  # rows per window
+            mk("Sub", [f"{p}/M", f"{p}/W"], [f"{p}/last"]),  # start of the last one
+            mk("Add", [f"{p}/M", c_rows1], [f"{p}/M+"]),
+            mk("Div", [f"{p}/M+", c_rows], [f"{p}/trips"]),
+            mk("Squeeze", [f"{p}/trips", c_0], [f"{p}/trip"]),
+            mk(
+                "Loop",
+                [f"{p}/trip", "tail/true"],
+                [f"{p}/scan"],
+                body=body,
+                name=f"{p}/loop",
+            ),
+            # windows (trips, 1, W, H) -> rows [0, (trips-1) rows) of the full
+            # windows, then the last window's rows that are not covered yet
+            mk("Reshape", [f"{p}/scan", c_flat], [f"{p}/flat"]),
+            mk("Sub", [f"{p}/trips", c_1], [f"{p}/trips-1"]),
+            mk("Mul", [f"{p}/trips-1", c_rows], [f"{p}/head"]),
+            mk("Slice", [f"{p}/flat", c_0, f"{p}/head", c_1], [f"{p}/head_rows"]),
+            mk("Mul", [f"{p}/trips", f"{p}/W"], [f"{p}/flat_rows"]),
+            mk("Sub", [f"{p}/M", f"{p}/head"], [f"{p}/rest"]),
+            mk("Sub", [f"{p}/flat_rows", f"{p}/rest"], [f"{p}/rest_start"]),
+            mk(
+                "Slice",
+                [f"{p}/flat", f"{p}/rest_start", f"{p}/flat_rows", c_1],
+                [f"{p}/rest_rows"],
+            ),
+            mk("Concat", [f"{p}/head_rows", f"{p}/rest_rows"], [f"{p}/rows"], axis=1),
+            mk("Reshape", [f"{p}/rows", f"{p}/shape"], [final]),
+        ]
+        moved.update(tail)
+    if replaced:
+        new_nodes: list[Any] = []
+        for k, n in enumerate(nodes):
+            if k in replaced:
+                new_nodes.extend(replaced[k])
+            elif k not in moved:
+                new_nodes.append(n)
+        del graph.node[:]
+        graph.node.extend(new_nodes)
+        graph.initializer.extend(inits)
+        del graph.value_info[:]
+    return len(replaced)
+
+
+def apply_tail(model: Any, tail: Tail, rows: int = ATTENTION_CHUNK) -> int:
+    """Run the layer-tail pass named by ``tail`` (``"none"`` leaves the graph)."""
+    if tail == "rows":
+        return layer_tail_row_loop(model, rows)
+    if tail == "loop":
+        return layer_tail_into_loop(model)
+    if tail != "none":
+        raise ValueError(f"unknown tail {tail!r}")
+    return 0
+
+
 def _quantize_rowwise(
     model: Any,
     *,
@@ -663,7 +829,7 @@ def _quantize_rowwise(
     zero_point: bool = True,
     keep_fp32: tuple[str, ...] = (),
     attention_chunk: int = ATTENTION_CHUNK,
-    layer_loop: bool = False,
+    tail: Tail = "none",
 ) -> None:
     import onnx
     from onnx import helper, numpy_helper
@@ -837,5 +1003,5 @@ def _quantize_rowwise(
     graph.initializer.extend(consts)
     # value_info entries of the raw export may now carry stale types
     del graph.value_info[:]
-    if attention_chunk > 0 and layer_loop:
-        layer_tail_into_loop(model)
+    if attention_chunk > 0:
+        apply_tail(model, tail, attention_chunk)

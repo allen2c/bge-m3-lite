@@ -440,10 +440,54 @@ def _body_ops(model, loop_name: str) -> list[str]:
     return [n.op_type for n in body.node]
 
 
+@pytest.mark.parametrize(
+    ("b", "s", "chunk"), [(2, 7, 3), (2, 7, 4), (1, 5, 64), (3, 4, 4)]
+)
+def test_layer_tail_row_loop_is_exact(b, s, chunk):
+    """The per-token tail of a layer runs in a scan-output ``Loop`` over
+    ``chunk`` rows of the flattened batch (14 rows with chunk 3/4: 5/4
+    windows, the last one shifted back; 12 rows with chunk 4: exact fit; 5
+    rows with chunk 64: one window) and the output is bit-identical."""
+    onnx = pytest.importorskip("onnx")
+    import numpy as np
+    import onnxruntime as ort
+
+    from bge_m3_lite.fuse import _chunk_attention
+
+    rng = np.random.default_rng(5)
+    h, heads = 16, 2
+    model = _two_layer_model(rng, b, s, h, heads)
+    feeds = {
+        "x": rng.standard_normal((b, s, h)).astype(np.float32),
+        "mask": np.array(
+            [[1] * s] * (b - 1) + [[1] * (s - 2) + [0] * 2], dtype=np.int32
+        ),
+    }
+    ref = np.asarray(
+        ort.InferenceSession(model.SerializeToString()).run(None, feeds)[0]
+    )
+    _chunk_attention(model, chunk)  # tail="rows" is the default
+    onnx.checker.check_model(model)
+    outer = [n.op_type for n in model.graph.node]
+    assert outer.count("MatMul") == 2 and outer.count("Loop") == 4  # QKV only
+    assert "SkipLayerNormalization" not in outer and "BiasGelu" not in outer
+    body = _body_ops(model, "Attention_1/tail/loop")
+    assert body.count("MatMul") == 3 and body.count("SkipLayerNormalization") == 2
+    assert body.count("Slice") == 2 and body[-1] == "Identity"
+    loop = next(n for n in model.graph.node if n.name == "Attention_1/tail/loop")
+    assert len(loop.input) == 2 and len(loop.output) == 1  # scan output only
+    assert model.graph.output[0].name == "layer.1/y"
+    out = np.asarray(
+        ort.InferenceSession(model.SerializeToString()).run(None, feeds)[0]
+    )
+    assert np.array_equal(out, ref)
+
+
 @pytest.mark.parametrize("chunk", [3, 4, 64])
 def test_layer_tail_moves_into_loop_and_stays_exact(chunk):
-    """The whole per-token tail of a layer runs inside the attention ``Loop``
-    and the fp32 output is unchanged (seq 7 with chunk 3/4: 3/2 iterations)."""
+    """``tail="loop"`` (v0.5.2): the whole per-token tail of a layer runs inside
+    the attention ``Loop`` and the fp32 output is unchanged (seq 7 with chunk
+    3/4: 3/2 iterations)."""
     onnx = pytest.importorskip("onnx")
     import numpy as np
     import onnxruntime as ort
@@ -460,7 +504,7 @@ def test_layer_tail_moves_into_loop_and_stays_exact(chunk):
     ref = np.asarray(
         ort.InferenceSession(model.SerializeToString()).run(None, feeds)[0]
     )
-    _chunk_attention(model, chunk)
+    _chunk_attention(model, chunk, tail="loop")
     onnx.checker.check_model(model)
     outer = [n.op_type for n in model.graph.node]
     assert outer.count("MatMul") == 2 and outer.count("Loop") == 2  # QKV only
@@ -485,7 +529,7 @@ def test_layer_tail_pass_is_optional_and_skips_broken_chains():
 
     rng = np.random.default_rng(6)
     model = _two_layer_model(rng, 1, 5, 8, 2)
-    _chunk_attention(model, 4, layer_loop=False)
+    _chunk_attention(model, 4, tail="none")
     assert [n.op_type for n in model.graph.node].count("SkipLayerNormalization") == 4
     # an FFN intermediate that is also a graph output breaks layer 0's chain
     model.graph.output.append(
@@ -496,7 +540,8 @@ def test_layer_tail_pass_is_optional_and_skips_broken_chains():
     assert "BiasGelu" in _body_ops(model, "Attention_1/loop")
 
 
-def test_rowwise_layer_tail_in_loop():
+@pytest.mark.parametrize("tail", ["loop", "rows"])
+def test_rowwise_layer_tail_in_loop(tail):
     """int8: the quantised projections of the tail move into the loop too."""
     pytest.importorskip("onnx")
     import numpy as np
@@ -514,13 +559,16 @@ def test_rowwise_layer_tail_in_loop():
     ref = np.asarray(
         ort.InferenceSession(model.SerializeToString()).run(None, feeds)[0]
     )
-    _quantize_rowwise(
-        model, quantize_embeddings=False, attention_chunk=4, layer_loop=True
-    )
+    _quantize_rowwise(model, quantize_embeddings=False, attention_chunk=4, tail=tail)
     outer = [n.op_type for n in model.graph.node]
     assert "SkipLayerNormalization" not in outer
     assert outer.count("MatMulIntegerToFloat") == 2  # the two QKV projections
-    body = _body_ops(model, "rowwise/Attention_0/loop")
+    body = _body_ops(
+        model,
+        "rowwise/Attention_0/loop"
+        if tail == "loop"
+        else "rowwise/Attention_0/tail/loop",
+    )
     assert body.count("MatMulIntegerToFloat") == 3
     assert body.count("SkipLayerNormalization") == 2
     out = np.asarray(

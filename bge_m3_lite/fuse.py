@@ -13,11 +13,12 @@ is two small files next to the original ``model.onnx_data``:
 
 With ``attention_chunk > 0`` (default 256) every ``Attention`` is then rewritten
 as ``MatMul`` + ``Split`` + ``MultiHeadAttention`` over query chunks in a
-``Loop`` (:func:`bge_m3_lite.quantize.attention_nodes`) and, with
-``layer_loop`` (default), the rest of the layer moves into that loop
-(:func:`bge_m3_lite.quantize.layer_tail_into_loop`), which bounds the attention
-score buffer and the FFN intermediates for long inputs (docs/memory.md); the
-outputs are unchanged.
+``Loop`` (:func:`bge_m3_lite.quantize.attention_nodes`), which bounds the
+attention score buffer, and the rest of the layer runs in a second ``Loop``
+over ``attention_chunk`` rows of the flattened batch (``tail="rows"``,
+:func:`bge_m3_lite.quantize.layer_tail_row_loop`), which bounds the FFN
+intermediates for every batch shape (docs/memory.md); the outputs are
+unchanged.
 """
 
 from __future__ import annotations
@@ -29,9 +30,10 @@ from typing import Any
 
 from bge_m3_lite.quantize import (
     ATTENTION_CHUNK,
+    Tail,
     _bump_opset,
+    apply_tail,
     attention_nodes,
-    layer_tail_into_loop,
     sha256,
     write_external_data,
 )
@@ -51,9 +53,9 @@ class FuseResult:
     fused: int  # tensors written to model_fused.onnx_data
 
 
-def _chunk_attention(model: Any, chunk: int, *, layer_loop: bool = True) -> None:
+def _chunk_attention(model: Any, chunk: int, *, tail: Tail = "rows") -> None:
     """``Attention`` -> ``MatMul`` + ``Split`` + chunked ``MultiHeadAttention``,
-    then (``layer_loop``) the rest of the layer into the same ``Loop``."""
+    then the layer tail as ``tail`` says (:func:`bge_m3_lite.quantize.apply_tail`)."""
     from onnx import helper
 
     _bump_opset(model, 13)
@@ -84,8 +86,7 @@ def _chunk_attention(model: Any, chunk: int, *, layer_loop: bool = True) -> None
     del model.graph.node[:]
     model.graph.node.extend(new_nodes)
     model.graph.initializer.extend(inits)
-    if layer_loop:
-        layer_tail_into_loop(model)
+    apply_tail(model, tail, chunk)
 
 
 def fuse(
@@ -93,7 +94,7 @@ def fuse(
     out_dir: str | Path | None = None,
     *,
     attention_chunk: int = ATTENTION_CHUNK,
-    layer_loop: bool = True,
+    tail: Tail = "rows",
     basename: str = "model_fused",
 ) -> FuseResult:
     """Write ``<basename>.onnx`` + ``<basename>.onnx_data`` next to ``model_in``
@@ -149,7 +150,7 @@ def fuse(
     if not any(o.domain == "com.microsoft" for o in model.opset_import):
         model.opset_import.add(domain="com.microsoft", version=1)
     if attention_chunk > 0:
-        _chunk_attention(model, attention_chunk, layer_loop=layer_loop)
+        _chunk_attention(model, attention_chunk, tail=tail)
     del model.metadata_props[:]
     entry = model.metadata_props.add()
     entry.key, entry.value = "bge_m3_lite.source_sha256", sha256(model_in)

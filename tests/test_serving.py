@@ -11,7 +11,9 @@ from bge_m3_lite.embedder import BGEM3Embedder
 from bge_m3_lite.serving import (
     DEFAULT_BATCH_WINDOW_MS,
     DEFAULT_CONCURRENCY,
+    LENGTH_BUCKETS,
     AsyncEmbedder,
+    length_bucket,
 )
 
 
@@ -224,6 +226,34 @@ def test_micro_batcher_merges_requests_and_splits_results():
     assert e["dense_vecs"][0] == 5 and e["lexical_weights"] is None
 
 
+def test_micro_batcher_keeps_long_texts_out_of_short_batches():
+    """A batch is padded to its longest text, so requests only merge within a
+    character-length bucket; a burst with one long passage leaves as two
+    calls and the short ones do not wait for it."""
+    fake = FakeEmbedder(delay=0.02)
+    assert LENGTH_BUCKETS == (128, 512, 2048)
+    assert [length_bucket([t]) for t in ("", "x" * 128, "x" * 129, "x" * 3000)] == [
+        0,
+        0,
+        1,
+        3,
+    ]
+    assert length_bucket(["short", "x" * 600]) == 2  # a request: its longest text
+
+    async def main():
+        emb = AsyncEmbedder(fake, max_concurrency=1, batch_window_ms=500)
+        blocker = await occupy(emb)
+        await asyncio.gather(
+            emb.encode("a"), emb.encode("x" * 600), emb.encode(["bb", "ccc"]), blocker
+        )
+        await emb.close()
+
+    run(main())
+    calls = [texts for texts, _ in fake.calls]
+    assert calls[0] == ["blocker"]
+    assert sorted(calls[1:]) == [["a", "bb", "ccc"], ["x" * 600]]
+
+
 def test_micro_batcher_window_and_full_batch_release_early():
     fake = FakeEmbedder(delay=0.1)
 
@@ -318,16 +348,25 @@ def test_real_model_matches_sync_api_bit_exact():
 
     direct, batched, lag = run(main())
     assert lag < 0.02
-    ref_list = sync.encode(texts, **kw)
+    # the burst leaves as one padded batch per length bucket (short, 中文 |
+    # the sentence, x * 300): each is exactly what encode(list) returns
+    groups = {
+        b: [i for i, t in enumerate(texts) if length_bucket([t]) == b] for b in (0, 1)
+    }
+    assert [len(g) for g in groups.values()] == [2, 2]
+    for group in groups.values():
+        ref_list = sync.encode([texts[i] for i in group], **kw)
+        for j, i in enumerate(group):
+            assert np.array_equal(batched[i]["dense_vecs"], ref_list["dense_vecs"][j])
+            assert batched[i]["lexical_weights"] == ref_list["lexical_weights"][j]
+            assert np.array_equal(
+                batched[i]["colbert_vecs"], ref_list["colbert_vecs"][j]
+            )
     for i, t in enumerate(texts):
         ref = sync.encode(t, **kw)
         assert np.array_equal(direct[i]["dense_vecs"], ref["dense_vecs"])
         assert direct[i]["lexical_weights"] == ref["lexical_weights"]
         assert np.array_equal(direct[i]["colbert_vecs"], ref["colbert_vecs"])
-        # one padded batch of mixed lengths: exactly what encode(list) returns
-        assert np.array_equal(batched[i]["dense_vecs"], ref_list["dense_vecs"][i])
-        assert batched[i]["lexical_weights"] == ref_list["lexical_weights"][i]
-        assert np.array_equal(batched[i]["colbert_vecs"], ref_list["colbert_vecs"][i])
         np.testing.assert_allclose(
             batched[i]["dense_vecs"], ref["dense_vecs"], atol=1e-4
         )

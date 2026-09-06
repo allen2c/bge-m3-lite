@@ -24,14 +24,27 @@ from bge_m3_lite.embedder import BATCH_SIZE, MAX_BATCH_TOKENS, BGEM3Embedder
 # per call and scales with runs in flight instead, batching loses there.
 DEFAULT_CONCURRENCY = {"fp32": 2, "int8": 4}
 DEFAULT_BATCH_WINDOW_MS = {"fp32": 10.0, "int8": 0.0}
+# The batcher only merges requests whose longest text falls in the same
+# character-length bucket (boundaries below, ×4 apart): a batch is padded to
+# its longest text, so one 600-token passage would turn a burst of queries
+# into a batch of passages (measured in docs/serving/measurements.md).
+LENGTH_BUCKETS = (128, 512, 2048)
 
 _Options = tuple[Any, ...]
 
 
-class _Pending:
-    """Requests with identical options waiting for the batch window to end."""
+def length_bucket(texts: Sequence[str]) -> int:
+    """Index of the ``LENGTH_BUCKETS`` bucket holding the longest text."""
+    longest = max(map(len, texts), default=0)
+    return sum(longest > bound for bound in LENGTH_BUCKETS)
 
-    def __init__(self, options: _Options) -> None:
+
+class _Pending:
+    """Requests with identical options and length bucket waiting for the
+    batch window to end."""
+
+    def __init__(self, key: tuple[Any, ...], options: _Options) -> None:
+        self.key = key
         self.options = options
         self.texts: list[str] = []
         self.waiters: list[tuple[asyncio.Future[Any], int, bool]] = []  # n, single
@@ -49,9 +62,10 @@ class AsyncEmbedder:
     running at once; further requests wait in ``queue_depth``. With
     ``batch_window_ms > 0`` (the micro-batcher) a request that finds every
     slot busy or claimed is held until a slot frees (at most that long), and
-    everything held with the same options (up to ``batch_size`` texts) goes
-    into one ``encode`` call: the outputs are what the synchronous ``encode``
-    returns for that list, split back per request. A request that finds a free
+    everything held with the same options and character-length bucket
+    (``LENGTH_BUCKETS``; up to ``batch_size`` texts) goes into one ``encode``
+    call: the outputs are what the synchronous ``encode`` returns for that
+    list, split back per request. A request that finds a free
     slot starts on the next loop iteration together with the rest of its
     burst, so the batcher costs nothing when the server is idle. Both default
     per precision (measured in docs/serving/recipe.md): 2 slots and a 10 ms window
@@ -87,7 +101,7 @@ class AsyncEmbedder:
             max_workers=max_concurrency, thread_name_prefix="bge-m3-lite"
         )
         self._slots = asyncio.Semaphore(max_concurrency)
-        self._pending: dict[_Options, _Pending] = {}
+        self._pending: dict[tuple[Any, ...], _Pending] = {}
         self._running: set[asyncio.Future[Any]] = set()
         self._queued = 0  # requests whose call is waiting for a slot
         self._waiting_calls = 0
@@ -211,15 +225,16 @@ class AsyncEmbedder:
                 self._flush(pending)
 
     async def _enqueue(self, texts: str | Sequence[str], options: _Options) -> Any:
-        """Join the pending group for these options; it leaves on the next loop
-        iteration when a slot is free, when it is full, or when a slot frees
-        (at most the window later)."""
+        """Join the pending group for these options and length bucket; it
+        leaves on the next loop iteration when a slot is free, when it is
+        full, or when a slot frees (at most the window later)."""
         single = isinstance(texts, str)
         items = [texts] if single else list(texts)
         loop = asyncio.get_running_loop()
-        pending = self._pending.get(options)
+        key = (*options, length_bucket(items))
+        pending = self._pending.get(key)
         if pending is None:
-            pending = self._pending[options] = _Pending(options)
+            pending = self._pending[key] = _Pending(key, options)
         fut: asyncio.Future[Any] = loop.create_future()
         pending.texts.extend(items)
         pending.waiters.append((fut, len(items), single))
@@ -239,7 +254,7 @@ class AsyncEmbedder:
 
     def _flush(self, pending: _Pending) -> None:
         """Move a pending group into one ``encode`` task that splits the result."""
-        if self._pending.pop(pending.options, None) is None:
+        if self._pending.pop(pending.key, None) is None:
             return  # already flushed
         if pending.handle is not None:
             pending.handle.cancel()
@@ -268,4 +283,10 @@ class AsyncEmbedder:
                 fut.set_result(part)
 
 
-__all__ = ["AsyncEmbedder", "DEFAULT_BATCH_WINDOW_MS", "DEFAULT_CONCURRENCY"]
+__all__ = [
+    "LENGTH_BUCKETS",
+    "AsyncEmbedder",
+    "DEFAULT_BATCH_WINDOW_MS",
+    "DEFAULT_CONCURRENCY",
+    "length_bucket",
+]
