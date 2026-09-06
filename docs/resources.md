@@ -1,8 +1,7 @@
 # Resource usage: memory and CPU-seconds
 
 v0.5 minimises what a session costs when it is *not* busy and what a token
-costs when it is. Numbers from `tools/eval_model.py` (which prints all of
-them) and the same code in a per-configuration harness; M4 (4P + 6E cores),
+costs when it is. Numbers from `tools/eval_model.py`; M4 (4P + 6E cores),
 ORT 1.29, 2026-09-06, nothing else running. Short query = one 9-token text
 per `encode` call; RSS = resident set size of the process.
 

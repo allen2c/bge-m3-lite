@@ -205,15 +205,18 @@ def evaluate(
 
 
 if __name__ == "__main__":
-    argv = sys.argv[1:]
-    low = "--low-memory" in argv
-    argv = [a for a in argv if a != "--low-memory"]
-    paths = [Path(p) for p in argv] or [hub.default_cache_dir() / "model.onnx"]
+    import argparse
+
+    ap = argparse.ArgumentParser(description="evaluate backbone ONNX files")
+    ap.add_argument("models", nargs="*", type=Path)
+    ap.add_argument("--low-memory", action="store_true", help="no weight prepacking")
+    args = ap.parse_args()
+    paths = args.models or [hub.default_cache_dir() / "model.onnx"]
     if len(paths) == 1:
-        evaluate(paths[0], low_memory=low)
+        evaluate(paths[0], low_memory=args.low_memory)
     else:  # one process per model, so RSS and thread counts are not inherited
         import subprocess
 
+        flags = ["--low-memory"] if args.low_memory else []
         for p in paths:
-            cmd = [sys.executable, __file__, str(p)] + (["--low-memory"] if low else [])
-            subprocess.run(cmd, check=True)
+            subprocess.run([sys.executable, __file__, str(p), *flags], check=True)

@@ -54,10 +54,11 @@ docker run --rm --platform linux/arm64 -v $PWD:/src:ro python:3.12-slim sh -c \
    ```bash
    bge-m3-lite fuse        # model_fused.onnx + model_fused.onnx_data (hub.FUSED_FILES)
    bge-m3-lite quantize    # model_int8.onnx + model_int8.onnx_data (hub.INT8_FILES)
-   cd ~/.cache/bge-m3-lite/BAAI--bge-m3 && gh release upload v0.5.0 -R allen2c/bge-m3-lite model_int8.onnx model_int8.onnx_data
+   gh release upload v0.5.0 -R allen2c/bge-m3-lite ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx_data
    ```
    Until the upload finishes, fresh installs of that version cannot download
-   the asset. Unchanged assets stay on their old release (per-file URLs).
+   the asset. Unchanged assets stay on their old release (per-file URLs);
+   verify with a fresh `BGE_M3_LITE_CACHE` afterwards.
 
 One-time setup: PyPI pending publisher (`release.yml`, environment `pypi`)
 and the `pypi` environment in the repository settings. Manual fallback:
