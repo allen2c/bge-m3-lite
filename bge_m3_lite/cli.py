@@ -9,7 +9,7 @@ from pathlib import Path
 
 from bge_m3_lite import __version__, hub
 from bge_m3_lite.embedder import BATCH_SIZE, MAX_BATCH_TOKENS, MAX_LENGTH
-from bge_m3_lite.quantize import ATTENTION_CHUNK
+from bge_m3_lite.quantize import ATTENTION_CHUNK, TAIL_ROWS
 
 
 def _cmd_download(args: argparse.Namespace) -> int:
@@ -51,6 +51,7 @@ def _cmd_quantize(args: argparse.Namespace) -> int:
         symmetric=args.symmetric,
         attention_chunk=args.attention_chunk,
         tail=args.tail,
+        tail_rows=args.tail_rows,
         keep_fp32=tuple(args.keep_fp32 or ()),
     )
     texts = load_calibration_texts(args.calibration) if args.calibration else None
@@ -79,6 +80,7 @@ def _cmd_fuse(args: argparse.Namespace) -> int:
         args.output,
         attention_chunk=args.attention_chunk,
         tail=args.tail,
+        tail_rows=args.tail_rows,
     )
     out = args.output or files["model.onnx"].parent
     for name, size, digest in (
@@ -215,6 +217,13 @@ def build_parser() -> argparse.ArgumentParser:
         "the whole batch (docs/memory.md)",
     )
     q.add_argument(
+        "--tail-rows",
+        type=int,
+        default=TAIL_ROWS["int8"],
+        metavar="N",
+        help="rows per window of the tail Loop (docs/memory.md)",
+    )
+    q.add_argument(
         "--symmetric",
         action="store_true",
         help="rowwise only: symmetric per-row activations (faster, less exact)",
@@ -247,6 +256,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="where the output projection and FFN run: a Loop over rows of the "
         "flattened batch (default), inside the attention Loop (v0.5.2), or on "
         "the whole batch (docs/memory.md)",
+    )
+    f.add_argument(
+        "--tail-rows",
+        type=int,
+        default=TAIL_ROWS["fp32"],
+        metavar="N",
+        help="rows per window of the tail Loop (docs/memory.md)",
     )
     f.set_defaults(func=_cmd_fuse)
     return parser

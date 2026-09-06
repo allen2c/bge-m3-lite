@@ -30,6 +30,7 @@ from typing import Any
 
 from bge_m3_lite.quantize import (
     ATTENTION_CHUNK,
+    TAIL_ROWS,
     Tail,
     _bump_opset,
     apply_tail,
@@ -53,7 +54,13 @@ class FuseResult:
     fused: int  # tensors written to model_fused.onnx_data
 
 
-def _chunk_attention(model: Any, chunk: int, *, tail: Tail = "rows") -> None:
+def _chunk_attention(
+    model: Any,
+    chunk: int,
+    *,
+    tail: Tail = "rows",
+    tail_rows: int = TAIL_ROWS["fp32"],
+) -> None:
     """``Attention`` -> ``MatMul`` + ``Split`` + chunked ``MultiHeadAttention``,
     then the layer tail as ``tail`` says (:func:`bge_m3_lite.quantize.apply_tail`)."""
     from onnx import helper
@@ -86,7 +93,7 @@ def _chunk_attention(model: Any, chunk: int, *, tail: Tail = "rows") -> None:
     del model.graph.node[:]
     model.graph.node.extend(new_nodes)
     model.graph.initializer.extend(inits)
-    apply_tail(model, tail, chunk)
+    apply_tail(model, tail, tail_rows)
 
 
 def fuse(
@@ -95,6 +102,7 @@ def fuse(
     *,
     attention_chunk: int = ATTENTION_CHUNK,
     tail: Tail = "rows",
+    tail_rows: int = TAIL_ROWS["fp32"],
     basename: str = "model_fused",
 ) -> FuseResult:
     """Write ``<basename>.onnx`` + ``<basename>.onnx_data`` next to ``model_in``
@@ -150,7 +158,7 @@ def fuse(
     if not any(o.domain == "com.microsoft" for o in model.opset_import):
         model.opset_import.add(domain="com.microsoft", version=1)
     if attention_chunk > 0:
-        _chunk_attention(model, attention_chunk, tail=tail)
+        _chunk_attention(model, attention_chunk, tail=tail, tail_rows=tail_rows)
     del model.metadata_props[:]
     entry = model.metadata_props.add()
     entry.key, entry.value = "bge_m3_lite.source_sha256", sha256(model_in)

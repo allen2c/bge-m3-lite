@@ -37,9 +37,10 @@ CALIBRATION_EXTRA = Path(__file__).with_name(
 )  # docs/calibration.md
 ATTENTION_CHUNK = 256  # see docs/memory.md (512 before v0.5.2)
 # Where the per-token tail of a layer (output projection, FFN) runs: a second
-# Loop over ATTENTION_CHUNK rows of the flattened batch (v0.6.1), inside the
+# Loop over TAIL_ROWS rows of the flattened batch (v0.6.1), inside the
 # attention Loop (v0.5.2), or on the whole padded batch (docs/memory.md).
 Tail = Literal["rows", "loop", "none"]
+TAIL_ROWS = {"fp32": 256, "int8": 1024}  # int8 pays per op per iteration
 SMOOTH_TARGETS = (  # node-name patterns of the projections to smooth (fused graph)
     r"^Attention_\d+(/MatMul)?$",  # merged QKV projection (chunked: its MatMul)
     r"attention/output/dense/MatMul$",
@@ -74,6 +75,7 @@ class QuantConfig:
     symmetric: bool = False  # rowwise: fixed zero point 128 instead of per-row
     attention_chunk: int = ATTENTION_CHUNK  # query rows per attention pass, 0 = off
     tail: Tail = "rows"  # where the layer tail runs (docs/memory.md)
+    tail_rows: int = TAIL_ROWS["int8"]  # rows per window of the tail Loop
     # node-name regexes whose MatMul / Attention stay fp32 (experiments)
     keep_fp32: tuple[str, ...] = ()
 
@@ -196,6 +198,7 @@ def _quantize(
             keep_fp32=config.keep_fp32,
             attention_chunk=config.attention_chunk,
             tail=config.tail,
+            tail_rows=config.tail_rows,
         )
     elif config.method == "dynamic":
         tmp = model_out.with_name(model_out.name + ".tmp")
@@ -673,7 +676,7 @@ def layer_tail_into_loop(model: Any) -> int:
     return rewritten
 
 
-def layer_tail_row_loop(model: Any, rows: int = ATTENTION_CHUNK) -> int:
+def layer_tail_row_loop(model: Any, rows: int = TAIL_ROWS["fp32"]) -> int:
     """Run the per-token tail of every layer in a second ``Loop`` over
     ``rows`` rows of the flattened ``(1, batch x seq, hidden)`` activations.
 
@@ -811,7 +814,7 @@ def layer_tail_row_loop(model: Any, rows: int = ATTENTION_CHUNK) -> int:
     return len(replaced)
 
 
-def apply_tail(model: Any, tail: Tail, rows: int = ATTENTION_CHUNK) -> int:
+def apply_tail(model: Any, tail: Tail, rows: int) -> int:
     """Run the layer-tail pass named by ``tail`` (``"none"`` leaves the graph)."""
     if tail == "rows":
         return layer_tail_row_loop(model, rows)
@@ -830,6 +833,7 @@ def _quantize_rowwise(
     keep_fp32: tuple[str, ...] = (),
     attention_chunk: int = ATTENTION_CHUNK,
     tail: Tail = "none",
+    tail_rows: int = TAIL_ROWS["int8"],
 ) -> None:
     import onnx
     from onnx import helper, numpy_helper
@@ -1004,4 +1008,4 @@ def _quantize_rowwise(
     # value_info entries of the raw export may now carry stale types
     del graph.value_info[:]
     if attention_chunk > 0:
-        apply_tail(model, tail, attention_chunk)
+        apply_tail(model, tail, tail_rows)
