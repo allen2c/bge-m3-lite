@@ -11,10 +11,13 @@ is two small files next to the original ``model.onnx_data``:
                                ``model.onnx_data`` by offset
 * ``model_fused.onnx_data``  – the 48 merged QKV weights and biases (288 MiB)
 
-With ``attention_chunk > 0`` (default) every ``Attention`` is then rewritten as
-``MatMul`` + ``Split`` + ``MultiHeadAttention`` over query chunks in a ``Loop``
-(:func:`bge_m3_lite.quantize.attention_nodes`), which bounds the attention
-score buffer for long inputs (docs/memory.md); the outputs are unchanged.
+With ``attention_chunk > 0`` (default 256) every ``Attention`` is then rewritten
+as ``MatMul`` + ``Split`` + ``MultiHeadAttention`` over query chunks in a
+``Loop`` (:func:`bge_m3_lite.quantize.attention_nodes`) and, with
+``layer_loop`` (default), the rest of the layer moves into that loop
+(:func:`bge_m3_lite.quantize.layer_tail_into_loop`), which bounds the attention
+score buffer and the FFN intermediates for long inputs (docs/memory.md); the
+outputs are unchanged.
 """
 
 from __future__ import annotations

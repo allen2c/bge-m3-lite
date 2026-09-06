@@ -57,8 +57,10 @@ tok/s; the Xeon was not drawn in three tries):** v4 recipe 384 (7763) / 342
 (9V74), `--matmul-integer` (v3 kernel path) 374 / 340, `--signed-weights`
 (u8·s8) 453 / 432 but dense cosine min 0.978 on both (MLAS's AVX2 kernel
 saturates, as predicted), both flags 442 / 414 with the same loss. On the
-EPYC the v3 → v4 change is therefore not a regression; the Xeon question stays
-open (`../roadmap/next.md`).
+EPYC the v3 → v4 change is therefore not a regression, a u8·s8 asset cannot be
+shipped as the single x86 file, and per-CPU int8 assets were judged not worth
+it: one x86 recipe, the experiment flags were removed again
+(`../roadmap/next.md`).
 
 The int8 build is deterministic on one machine but not across CPUs: the
 SmoothQuant statistics are fp32 activations, so every runner produced a

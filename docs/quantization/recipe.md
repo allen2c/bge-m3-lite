@@ -90,8 +90,6 @@ bge-m3-lite quantize --calibration my_texts.txt                   # own calibrat
 bge-m3-lite quantize --keep-fp32 'layer\.23/' --keep-fp32 'Attention_23$'  # last layer fp32
 bge-m3-lite quantize --attention-chunk 0                          # single MultiHeadAttention per layer
 bge-m3-lite quantize --layer-loop                                 # FFN inside the Loop too (fp32 layout; costs memory here)
-bge-m3-lite quantize --matmul-integer                             # v3 kernel path: MatMulInteger + Cast + Mul
-bge-m3-lite quantize --signed-weights                             # u8·s8 (VNNI/AMX operand order; wrong on AVX2)
 uv run tools/eval_model.py path/to/model.onnx                     # accuracy + speed report
 ```
 

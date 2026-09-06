@@ -2,21 +2,21 @@
 
 Shipped versions and the facts behind them: `done.md`.
 
-## int8 on Xeon (VNNI): the v4 recipe regressed (measured 2026-09-06)
+## int8 on Xeon (VNNI): measured, closed (2026-09-06)
 
 - Xeon 8573C runner: int8 v4 473–494 tok/s versus fp32 fused 564–576
-  (0.84×), where v3 (`MatMulInteger` + `Cast` + `Mul`, v0.3.1, 4 threads
-  with spinning) did 742 (1.5×). Threads and spinning are not the cause
-  (`env_variants` bench on two Xeon draws): 4 threads +8 % for int8 (511
-  tok/s) and −3 % for fp32, `BGE_M3_LITE_SPIN=1` ±2 %; the ordering stays.
-  Short queries are still 2× faster with int8 there (31 vs 57 ms).
-- Kernel candidates, buildable as `quantize` variants: `--matmul-integer`
-  (v3 path), `--signed-weights` (u8·s8, the native `VPDPBUSD`/AMX operand
-  order; saturates MLAS's AVX2 kernel, so accuracy must be read on the EPYC
-  too), and both. CI results: `quantization/measurements.md`.
-- Profile the remaining scalar ops (`ReduceMax/ReduceMin` are two extra
-  passes over the input); fold the scalar scale/zero-point chain to cut the
-  2 700 nodes (start-up 1.1 s vs 0.4 s fp32).
+  (0.84×) on 128-token batches, short queries still 2× faster with int8
+  (31 vs 57 ms). Threads and spinning are not the cause (4 threads +8 %,
+  spin ±2 %). `MatMulInteger` (v3 path) gains nothing on the EPYCs, u8·s8
+  weights gain 18–26 % there but saturate the AVX2 kernel (dense 0.978), so
+  they cannot be the single x86 asset (`../quantization/measurements.md`).
+- Decision: one x86 recipe (v4, u8·u8); no per-CPU assets, no more Xeon
+  hunting on the random `ubuntu-latest` runner. Reopen only if a user
+  reports a Xeon-only workload where batch throughput matters more than the
+  2× short-query gain.
+- Still worth a look on every platform: fold the scalar scale/zero-point
+  chain (2 700 nodes: start-up 1.1 s vs 0.4 s fp32; the layer loop halves
+  it but costs memory on int8).
 
 ## v0.5.x — resource efficiency (v0.5.0–v0.5.2 shipped, see `done.md`, `../resources.md`, `../memory.md`)
 
