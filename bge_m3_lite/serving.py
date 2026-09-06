@@ -149,10 +149,11 @@ class AsyncEmbedder:
         for pending in list(self._pending.values()):
             self._flush(pending)
         while self._running or self.queue_depth:
-            if self._running:
-                await asyncio.gather(*self._running, return_exceptions=True)
-            else:
-                await asyncio.sleep(0)  # a queued request is taking its slot
+            running = [f for f in self._running if not f.done()]
+            if running:
+                await asyncio.wait(running)
+            else:  # a queued request is taking its slot, or a done task is
+                await asyncio.sleep(0)  # waiting for its callback to drop it
         self._executor.shutdown(wait=True)
         if self._owns_embedder:
             self.embedder.close()

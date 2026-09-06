@@ -163,9 +163,11 @@ def test_back_pressure_bounds_in_flight_and_counts_queue():
 async def occupy(emb: AsyncEmbedder) -> asyncio.Task:
     """Take the only slot so that the next requests are held and batched."""
     task = asyncio.create_task(emb.encode("blocker"))
-    await asyncio.sleep(0.005)
-    assert emb.in_flight == 1
-    return task
+    for _ in range(100):  # Windows timers tick every 15 ms: poll instead
+        await asyncio.sleep(0.001)
+        if emb.in_flight == 1:
+            return task
+    raise AssertionError("blocker never started")
 
 
 def test_micro_batcher_starts_at_once_when_a_slot_is_free():
