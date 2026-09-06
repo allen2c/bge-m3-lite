@@ -75,11 +75,12 @@ jobs:
         id: cpu
         shell: bash
         run: |
-          cpu=$(lscpu 2>/dev/null | sed -n 's/^Model name:[ \t]*//p' | head -1)
+          cpu=$( { lscpu 2>/dev/null || true; } | sed -n 's/^Model name:[ \t]*//p' | head -1)
           [ -n "$cpu" ] || cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || true)
           [ -n "$cpu" ] || cpu=$(uv run python -c "import platform; print(platform.processor() or platform.machine())")
-          echo "cpu=$cpu ($(nproc 2>/dev/null || sysctl -n hw.ncpu) vCPU)" >> "$GITHUB_OUTPUT"
-          echo "$cpu"; lscpu 2>/dev/null | grep -i flags | cut -c1-400 || true
+          ncpu=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "?")
+          echo "cpu=$cpu ($ncpu vCPU)" >> "$GITHUB_OUTPUT"
+          echo "$cpu"; { lscpu 2>/dev/null || true; } | grep -i flags | cut -c1-400 || true
       - shell: bash
         run: |
           cd ~/.cache/bge-m3-lite/BAAI--bge-m3
@@ -90,7 +91,8 @@ jobs:
         shell: bash
         run: |
           cd ~/.cache/bge-m3-lite/BAAI--bge-m3
-          mkdir -p local && ln -f model.onnx_data local/model.onnx_data  # ORT rejects symlinks that leave the model dir
+          # onnx's checker rejects hard links, ORT rejects symlinks that leave the model dir: copy
+          mkdir -p local && cp model.onnx_data local/
           echo "##### fuse (local build)" | tee -a "$RUNNER_TEMP/eval.log"
           uv run --project "$GITHUB_WORKSPACE" bge-m3-lite --quiet fuse --output local
           uv run --project "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/eval_model.py" local/model_fused.onnx | tee -a "$RUNNER_TEMP/eval.log"

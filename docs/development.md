@@ -46,7 +46,7 @@ docker run --rm --platform linux/arm64 -v $PWD:/src:ro python:3.12-slim sh -c \
 3. Tag and push; `release.yml` runs the checks, publishes to PyPI via trusted
    publishing (environment `pypi`) and creates the GitHub release:
    ```bash
-   git tag -a v0.3.1 -m v0.3.1 && git push origin v0.3.1
+   git tag -a v0.4.0 -m v0.4.0 && git push origin v0.4.0
    ```
 4. Upload the model assets the new `hub.py` points at (deterministic builds,
    compare the printed digests first). Run `gh` inside the repository: leaving
@@ -54,7 +54,7 @@ docker run --rm --platform linux/arm64 -v $PWD:/src:ro python:3.12-slim sh -c \
    ```bash
    bge-m3-lite fuse        # model_fused.onnx + model_fused.onnx_data (hub.FUSED_FILES)
    bge-m3-lite quantize    # model_int8.onnx (hub.INT8_FILE)
-   gh release upload v0.3.1 -R allen2c/bge-m3-lite ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx
+   gh release upload v0.4.0 -R allen2c/bge-m3-lite ~/.cache/bge-m3-lite/BAAI--bge-m3/model_fused.onnx ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx
    ```
    Until the upload finishes, fresh installs of that version cannot download
    the asset. Unchanged assets stay on their old release (per-file URLs).
