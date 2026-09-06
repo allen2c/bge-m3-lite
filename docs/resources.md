@@ -52,7 +52,7 @@ are < 4 % of the CPU time; the rest is the backbone.
 | v0.5 default | 0.38 s | 1283 MiB | 1554 MiB | 2392 MiB | 2143 | 1.73 | 20 / 71 ms | 0 |
 | int8 v0.5 default | 0.75 s | 724 MiB | 935 MiB | 1679 MiB | 1582 | 2.32 | 11 / 29 ms | 0 |
 
-## CPU-seconds per request under concurrency (v0.6, `serving.md`)
+## CPU-seconds per request under concurrency (v0.6, `serving/recipe.md`)
 
 Runs in flight on one 4-thread session, 9-token queries (`tools/bench_serving.py`,
 M4): fp32 72 ms CPU per request alone, 63–68 with two in flight (the second

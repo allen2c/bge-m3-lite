@@ -1,43 +1,34 @@
-# Roadmap: what is next
+# Roadmap: v0.6.1 (next)
 
-Shipped versions and the facts behind them: `done.md`.
+Shipped versions and the facts behind them: `done.md`. Every item below is
+measured before it is merged (CI `bench` matrix, `tools/bench_serving.py`
+run alone on the M4) and lands only if the numbers say so.
 
-## int8 on Xeon (VNNI): measured, closed (2026-09-06)
+## v0.6.1 — serving follow-ups and the leftovers
 
-- Xeon 8573C runner: int8 v4 473–494 tok/s versus fp32 fused 564–576
-  (0.84×) on 128-token batches, short queries still 2× faster with int8
-  (31 vs 57 ms). Threads and spinning are not the cause (4 threads +8 %,
-  spin ±2 %). `MatMulInteger` (v3 path) gains nothing on the EPYCs, u8·s8
-  weights gain 18–26 % there but saturate the AVX2 kernel (dense 0.978), so
-  they cannot be the single x86 asset (`../quantization/measurements.md`).
-- Decision: one x86 recipe (v4, u8·u8); no per-CPU assets, no more Xeon
-  hunting on the random `ubuntu-latest` runner. Reopen only if a user
-  reports a Xeon-only workload where batch throughput matters more than the
-  2× short-query gain.
-- Still worth a look on every platform: fold the scalar scale/zero-point
-  chain (2 700 nodes: start-up 1.1 s vs 0.4 s fp32; the layer loop halves
-  it but costs memory on int8).
+| item | what to do | done when |
+|---|---|---|
+| ORT `run_async` versus threads | `session.run_async` from the loop thread instead of `run_in_executor`; measure req/s, p50/p95, CPU/req and loop lag at concurrency 1–8 on fp32 and int8 (`bench_serving.py` gets a mode) | adopted only if it beats the thread pool on the M4 and two runners; otherwise recorded in `../serving/measurements.md` and closed |
+| token-aware micro-batcher | the batcher counts texts, so one long passage in a query batch pads every query to its width; hold a request's token count (tokenize in the worker, or a cheap length estimate) and flush a group at `max_batch_tokens`, or keep long texts out of query batches | mixed query + 600-token burst no slower than the query-only burst; bit-exact test with mixed lengths still green |
+| short-batch activation memory | fp32 batches of texts ≤ 256 tokens cost +20 % since v0.5.2 (three hidden-state copies per layer inside the `Loop`); try a scan output or a single-iteration bypass in `fuse` | `128 × 128` peak back to ≤ 1450 MiB (`../memory.md` table) at unchanged tok/s and bit-exact outputs |
+| int8 node count / start-up | fold the scalar scale / zero-point chain (2 700 outer nodes, 1.1 s start-up on runners vs 0.4 s fp32); the layer loop halves it but costs memory on int8 | start-up ≤ 0.6 s on the M4 without a memory regression in the `../memory.md` int8 columns |
 
-## v0.5.x — resource efficiency (v0.5.0–v0.5.2 shipped, see `done.md`, `../resources.md`, `../memory.md`)
+Serving numbers on the CI runners are in `../serving/measurements.md`
+(EPYC 9V74, Neoverse-N2, M1 VM, 2026-09-06).
 
-- **v0.5.2** shipped (`done.md`, `../memory.md`): chunk 256 and the layer
-  tail inside the attention `Loop` for fp32. Left open: the +20 % for batches
-  of texts no longer than the chunk (three hidden-state copies per layer in
-  the loop; a scan output would need equal chunks), and a memory-exact int8
-  layout (the loop costs memory there). The arena high-water mark, not the
-  live set, is what `max_batch_tokens` buys; `kSameAsRequested` and
-  shrinkage were measured and rejected.
-- **v0.6.0 shipped** (`done.md`, `../serving.md`): `AsyncEmbedder`. Left
-  open: CI-runner serving numbers in the docs (the bench matrix prints them),
-  ORT `run_async` versus Python threads (unmeasured), a token-aware batch
-  window (the batcher counts texts; a long passage in a query batch costs
-  everyone its width).
-- **later candidates** — weight-only int8 `MatMulNBits` for Apple Silicon
-  (memory only; int8 GEMM is slower than SGEMM there); embeddings served from
-  the mmapped file instead of the int8 `Gather` copy; sparse-head rounding
-  experiments with the held-out set.
+## Closed decisions (do not reopen without a user report)
 
-## Later
+- int8 on Xeon (VNNI): v4 is 0.84× fp32 on 128-token batches, short queries
+  still 2× faster; one x86 recipe (u8·u8), no per-CPU assets
+  (`../quantization/measurements.md`).
+- Arena tuning: `kSameAsRequested`, shrinkage and disabling the arena were
+  measured and rejected (`../memory.md`, `../resources.md`).
 
-- Rust/maturin kernels: only if onnxruntime is still the bottleneck
-  (the pure-Python tokenizer and the fixtures are the correctness contract).
+## Later candidates
+
+- Weight-only int8 `MatMulNBits` for Apple Silicon (memory only; int8 GEMM
+  is slower than SGEMM there); embeddings served from the mmapped file
+  instead of the int8 `Gather` copy; sparse-head rounding experiments with
+  the held-out set.
+- Rust/maturin kernels only if onnxruntime is still the bottleneck (the
+  pure-Python tokenizer and the fixtures are the correctness contract).

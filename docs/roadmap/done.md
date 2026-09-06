@@ -110,7 +110,7 @@ loop all lost).
 
 ## v0.6.0 — asyncio serving (done)
 
-`AsyncEmbedder` (`../serving.md`, measured with `tools/bench_serving.py` on
+`AsyncEmbedder` (`../serving/recipe.md`, measured with `tools/bench_serving.py` on
 the M4 and the CI matrix, 2026-09-06; no model asset changes): `await
 encode / encode_queries / encode_corpus` with the synchronous signatures and
 outputs, run in a private thread pool with at most `max_concurrency` calls in

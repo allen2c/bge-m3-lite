@@ -5,7 +5,7 @@ shared embedder can serve many coroutines. :class:`AsyncEmbedder` runs the
 calls in its own thread pool (never the loop thread, never the default
 ``to_thread`` pool), lets at most ``max_concurrency`` of them run at once and,
 with ``batch_window_ms > 0``, merges requests that arrive within the window
-into one ``encode`` call (docs/serving.md has the numbers behind the defaults).
+into one ``encode`` call (docs/serving/recipe.md has the numbers behind the defaults).
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import Any
 
 from bge_m3_lite.embedder import BATCH_SIZE, MAX_BATCH_TOKENS, BGEM3Embedder
 
-# Measured on the M4 (docs/serving.md): fp32 short queries are GEMM-bound —
+# Measured on the M4 (docs/serving/recipe.md): fp32 short queries are GEMM-bound —
 # two runs in flight fill the thread gaps, and padding a burst into one call
 # is what scales (8 clients: 174 req/s versus 73); int8 runs 2 700 small ops
 # per call and scales with runs in flight instead, batching loses there.
@@ -54,7 +54,7 @@ class AsyncEmbedder:
     returns for that list, split back per request. A request that finds a free
     slot starts on the next loop iteration together with the rest of its
     burst, so the batcher costs nothing when the server is idle. Both default
-    per precision (measured in docs/serving.md): 2 slots and a 10 ms window
+    per precision (measured in docs/serving/recipe.md): 2 slots and a 10 ms window
     for fp32, 4 slots and no batching for int8.
     """
 

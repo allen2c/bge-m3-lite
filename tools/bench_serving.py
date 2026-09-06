@@ -13,7 +13,7 @@ main thread; `asyncio.to_thread(emb.encode, q)` at each concurrency, with a
 closed loop of that many clients (a client sends its next request as soon as
 the previous one returns, like `wrk`); `encode(list)` in batches of several
 sizes (every request waits for the whole batch); `AsyncEmbedder` with its
-default `max_concurrency`, batching off and with the window (docs/serving.md);
+default `max_concurrency`, batching off and with the window (docs/serving/recipe.md);
 the same for passages (`--passage-tokens`, the 128 default is the 158-token
 text of `eval_model.py`); and, with `--sessions N`, N sessions of
 ``threads / N`` intra-op threads each, one client per session. Peak RSS is
@@ -34,7 +34,7 @@ from statistics import quantiles
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # for eval_model helpers
 
-from eval_model import peak_rss_mib, rss_mib  # noqa: E402
+from eval_model import os_threads, peak_rss_mib, rss_mib  # noqa: E402
 
 from bge_m3_lite.embedder import BGEM3Embedder  # noqa: E402
 from bge_m3_lite.serving import AsyncEmbedder  # noqa: E402
@@ -244,7 +244,8 @@ def main() -> int:
     load_s = time.perf_counter() - t0
     name = args.model.name if args.model else args.precision
     print(
-        f"\n#### serving {name}: {len(embedders)} session(s) × {threads} threads, "
+        f"\n#### serving {name}: {len(embedders)} session(s) × {threads} threads "
+        f"(0 = onnxruntime default; {os_threads()} OS threads), "
         f"load {load_s:.2f} s, rss {rss_mib():.0f} MiB, python {sys.version.split()[0]}, "
         f"os {sys.platform} cpus {os.cpu_count()}\n"
     )

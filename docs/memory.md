@@ -94,5 +94,5 @@ Rule of thumb since v0.5.2: **peak ≈ RSS after load + 0.11 MiB × padded token
 per batch** for short texts, **0.07–0.08 MiB** for texts of 512+ tokens; a
 budget of `H` MiB allows `max_batch_tokens ≈ H / 0.11`. The arena keeps the
 largest buffer set, so the peak is reached once and stays. Concurrent runs
-(`serving.md`) each add their own set: 626-token texts cost +41 MiB (fp32) /
+(`serving/recipe.md`) each add their own set: 626-token texts cost +41 MiB (fp32) /
 +38 MiB (int8) per extra run in flight, i.e. the 0.07 MiB rule per run.

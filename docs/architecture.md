@@ -28,7 +28,7 @@ Formulas follow `FlagEmbedding/inference/embedder/encoder_only/m3.py` and
 | `model.py` | `OnnxBackbone`: ORT session, CPU provider, `ORT_ENABLE_ALL`, no thread spinning, P-core thread default, `low_memory` = no prepacking (`resources.md`) |
 | `fuse.py`, `quantize.py`, `calibration*.txt` | build-time only (`quant` extra): fused fp32 graph, SmoothQuant + int8 backbone, chunked attention (`memory.md`, `calibration.md`) |
 | `embedder.py` | `BGEM3Embedder`: batching (longest first, text + token budget), pooling, `compute_score` |
-| `serving.py` | `AsyncEmbedder`: asyncio front-end — own thread pool, bounded in-flight calls, optional micro-batching (`serving.md`) |
+| `serving.py` | `AsyncEmbedder`: asyncio front-end — own thread pool, bounded in-flight calls, optional micro-batching (`serving/recipe.md`) |
 | `cli.py` | `bge-m3-lite download / info / encode / fuse / quantize` |
 
 ## Model files (Hugging Face `BAAI/bge-m3`, revision `5617a9f6`)

@@ -5,13 +5,16 @@
 
 ## Rules
 
-- Never add a runtime dependency. Dev tools go in `[dependency-groups] dev`,
-  build-time ONNX tooling in the `quant` extra, torch/transformers in `ref`.
+- Never add a runtime dependency (`asyncio`, `threading` are stdlib). Dev
+  tools go in `[dependency-groups] dev`, build-time ONNX tooling in the
+  `quant` extra, torch/transformers in `ref`.
 - Flat layout (`bge_m3_lite/`, `tests/`, `tools/`, `docs/`), no `src/`.
-- fp32 outputs must match FlagEmbedding: `tests/fixtures/` is the contract.
+- fp32 outputs must match FlagEmbedding: `tests/fixtures/` is the contract;
+  `AsyncEmbedder` must stay bit-exact with the synchronous API.
 - Verify claims empirically (CI `bench` matrix for anything platform-specific;
   the development Mac is not representative) and record the numbers in
   `docs/`; do not rely on memory. Benchmark with nothing else running.
+- Test on Python 3.11 and 3.13 (asyncio differs; see `docs/development.md`).
 - Docs stay under 100 lines each (150 max); split into folders instead.
 
 ## Commands
@@ -21,7 +24,7 @@ uv sync --group dev --group quant
 uv run ruff format . && uv run ruff check . && uv run pyright
 uv run pyproject-fmt --check pyproject.toml && uv run pytest
 BGE_M3_LITE_RUN_SLOW=1 uv run pytest -m slow    # full model, 2.3 GB cache
-uv run tools/bench_serving.py --precision int8  # serving numbers, run alone (docs/serving.md)
+uv run tools/bench_serving.py --precision int8  # serving numbers, run alone
 ```
 
 ## Docs (`docs/`)
@@ -31,13 +34,12 @@ uv run tools/bench_serving.py --precision int8  # serving numbers, run alone (do
 | `architecture.md` | modules, data flow, model files, cache |
 | `tokenizer.md` | the from-scratch XLM-R tokenizer |
 | `fusion.md` | fused fp32 graph: what ships, how it is built |
-| `quantization/recipe.md` | int8 backbone: SmoothQuant + row-wise scheme, variants |
-| `quantization/measurements.md` | int8 accuracy and speed per platform |
+| `quantization/recipe.md`, `measurements.md` | int8 backbone: SmoothQuant + row-wise scheme; accuracy and speed per platform |
 | `calibration.md` | calibration texts (sources, licence), held-out evaluation set |
-| `memory.md` | attention `Loop` (chunk 256, layer tail inside since v0.5.2); activation memory per padded token, `max_batch_tokens` budget |
-| `resources.md` | resident memory, CPU-seconds per token, threads, idle CPU, `low_memory` (v0.5) |
-| `serving.md` | `AsyncEmbedder` for FastAPI: concurrency, micro-batching, workers × memory, measured req/s (v0.6) |
+| `memory.md` | attention `Loop` (chunk 256, layer tail inside); activation memory per padded token, `max_batch_tokens` |
+| `resources.md` | resident memory, CPU-seconds per token and per request, threads, idle CPU, `low_memory` |
+| `serving/recipe.md`, `measurements.md` | `AsyncEmbedder` for FastAPI: defaults, micro-batcher, workers × memory; req/s tables (M4, CI runners) |
 | `verification.md` | accuracy, platforms, throughput, start-up, memory |
-| `development.md` | fixtures, CI bench inputs, release and asset upload |
+| `development.md` | fixtures, CI bench inputs, Python 3.13 check, release and asset upload |
 | `roadmap/done.md` | shipped versions and the facts behind them |
-| `roadmap/next.md` | open items: short-batch memory, int8 node count, serving follow-ups |
+| `roadmap/next.md` | v0.6.1 plan: `run_async`, token-aware batching, short-batch memory, int8 start-up |

@@ -70,7 +70,7 @@ memory.
 `BGEM3Embedder(low_memory=True)` starts in 0.1–0.6 s with ~140 MiB of private
 memory (weights stay in the mapped file, shared between processes) at twice
 the latency of a single short query: for serverless and one-shot use
-(`docs/resources.md`). Serving: `docs/serving.md` (FastAPI recipe, workers ×
+(`docs/resources.md`). Serving: `docs/serving/recipe.md` (FastAPI recipe, workers ×
 memory, measured throughput per concurrency).
 
 ### CLI
