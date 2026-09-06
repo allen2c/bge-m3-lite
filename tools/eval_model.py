@@ -16,20 +16,11 @@ from bge_m3_lite.embedder import BGEM3Embedder
 FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
 
 
-def evaluate(model_path: Path) -> None:
-    ref = json.loads((FIXTURES / "embeddings_ref.json").read_text(encoding="utf-8"))
-    npz = np.load(FIXTURES / "embeddings_ref.npz")
-    t0 = time.perf_counter()
-    emb = BGEM3Embedder(quiet=True, model_path=model_path)
-    print(
-        f"\n== {model_path} ({model_path.stat().st_size / 2**20:.0f} MiB) "
-        f"session {time.perf_counter() - t0:.1f}s"
-    )
-    out = emb.encode(
-        ref["sentences"], batch_size=4, return_sparse=True, return_colbert_vecs=True
-    )
+def _report_sparse_colbert(
+    emb: BGEM3Embedder, out: dict, ref: dict, npz: np.lib.npyio.NpzFile, label: str
+) -> None:
     dense_cos = (out["dense_vecs"] * npz["dense"]).sum(1)
-    print(f"dense cos: min {dense_cos.min():.5f} mean {dense_cos.mean():.5f}")
+    print(f"[{label}] dense cos: min {dense_cos.min():.5f} mean {dense_cos.mean():.5f}")
     same_keys = top5 = spearman = 0.0
     for lw, rlw in zip(out["lexical_weights"], ref["lexical_weights"], strict=True):
         same_keys += set(lw) == set(rlw)
@@ -45,7 +36,7 @@ def evaluate(model_path: Path) -> None:
             spearman += 1.0
     n = len(ref["sentences"])
     print(
-        f"sparse: same key set {same_keys:.0f}/{n}, top-5 identical {top5:.0f}/{n}, "
+        f"[{label}] sparse: same key set {same_keys:.0f}/{n}, top-5 identical {top5:.0f}/{n}, "
         f"mean Spearman {spearman / n:.4f}"
     )
     cols = [
@@ -54,15 +45,44 @@ def evaluate(model_path: Path) -> None:
     allc = np.concatenate(cols)
     p1, p5 = np.percentile(allc, [1, 5])
     print(
-        f"colbert token cos: min {allc.min():.5f} p1 {p1:.5f} p5 {p5:.5f} mean {allc.mean():.5f}"
+        f"[{label}] colbert token cos: min {allc.min():.5f} p1 {p1:.5f} p5 {p5:.5f} "
+        f"mean {allc.mean():.5f}"
     )
     # late-interaction ranking agreement: query 0 against all others
     q, rq = out["colbert_vecs"][0], npz["colbert_0"]
     s = [emb.colbert_score(q, c) for c in out["colbert_vecs"][1:]]
     rs = [emb.colbert_score(rq, npz[f"colbert_{i}"]) for i in range(1, n)]
     print(
-        f"colbert ranking (q0 vs rest) identical: {np.argsort(s).tolist() == np.argsort(rs).tolist()}"
+        f"[{label}] colbert ranking (q0 vs rest) identical: "
+        f"{np.argsort(s).tolist() == np.argsort(rs).tolist()}"
     )
+
+
+def evaluate(model_path: Path, *, heldout: bool = True) -> None:
+    ref = json.loads((FIXTURES / "embeddings_ref.json").read_text(encoding="utf-8"))
+    npz = np.load(FIXTURES / "embeddings_ref.npz")
+    t0 = time.perf_counter()
+    emb = BGEM3Embedder(quiet=True, model_path=model_path)
+    print(
+        f"\n== {model_path} ({model_path.stat().st_size / 2**20:.0f} MiB) "
+        f"session {time.perf_counter() - t0:.1f}s"
+    )
+    out = emb.encode(
+        ref["sentences"], batch_size=4, return_sparse=True, return_colbert_vecs=True
+    )
+    _report_sparse_colbert(emb, out, ref, npz, "11-set")
+
+    if heldout and (FIXTURES / "heldout_ref.npz").exists():
+        href = json.loads((FIXTURES / "heldout_ref.json").read_text(encoding="utf-8"))
+        hnpz = np.load(FIXTURES / "heldout_ref.npz")
+        hout = emb.encode(
+            href["sentences"],
+            batch_size=4,
+            return_sparse=True,
+            return_colbert_vecs=True,
+        )
+        _report_sparse_colbert(emb, hout, href, hnpz, "held-out")
+
     for name, text, bs in [
         ("16tok x32", "What is the capital of France? " * 2, 32),
         ("128tok x16", "The quick brown fox jumps over the lazy dog. " * 12, 16),

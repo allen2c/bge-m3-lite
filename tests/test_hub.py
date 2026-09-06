@@ -1,5 +1,8 @@
 import hashlib
+from email.message import Message
 from pathlib import Path
+
+import pytest
 
 from bge_m3_lite import hub
 
@@ -90,3 +93,75 @@ def test_fused_files_and_url_override(monkeypatch):
     assert hub.file_url(hub.FUSED_FILES[1]) == (
         "https://mirror.example/fused/model_fused.onnx_data"
     )
+
+
+class _Resp:
+    status = 200
+
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def read(self, n: int) -> bytes:
+        out, self._data = self._data[:n], self._data[n:]
+        return out
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _http_error(url: str, code: int, retry_after: str | None = None):
+    headers = Message()
+    if retry_after:
+        headers["Retry-After"] = retry_after
+    return hub.urllib.error.HTTPError(url, code, "error", headers, None)
+
+
+def test_download_retries_on_429_then_succeeds(tmp_path, monkeypatch):
+    data = b"payload" * 100
+    remote = hub.RemoteFile(
+        "f.bin", "f.bin", len(data), hashlib.sha256(data).hexdigest()
+    )
+    calls: list[str] = []
+    delays: list[float] = []
+
+    def fake_urlopen(req, **k):
+        calls.append(req.full_url)
+        if len(calls) == 1:
+            raise _http_error(req.full_url, 429, "3")
+        if len(calls) == 2:
+            raise TimeoutError("timed out")
+        return _Resp(data)
+
+    monkeypatch.setattr(hub.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(hub.time, "sleep", delays.append)
+    assert hub.download(remote, tmp_path / "f.bin", quiet=True).read_bytes() == data
+    assert len(calls) == 3 and delays == [3.0, hub.BACKOFF * 2]
+
+
+def test_download_gives_up_after_retries(tmp_path, monkeypatch):
+    remote = hub.RemoteFile("f.bin", "f.bin", 7, None)
+
+    def fake_urlopen(req, **k):
+        raise _http_error(req.full_url, 503)
+
+    monkeypatch.setattr(hub.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(hub.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="failed to download"):
+        hub.download(remote, tmp_path / "f.bin", quiet=True)
+
+
+def test_download_does_not_retry_client_errors(tmp_path, monkeypatch):
+    remote = hub.RemoteFile("f.bin", "f.bin", 7, None)
+    calls: list[int] = []
+
+    def fake_urlopen(req, **k):
+        calls.append(1)
+        raise _http_error(req.full_url, 404)
+
+    monkeypatch.setattr(hub.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError, match="404"):
+        hub.download(remote, tmp_path / "f.bin", quiet=True)
+    assert len(calls) == 1

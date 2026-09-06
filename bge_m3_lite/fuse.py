@@ -10,6 +10,11 @@ is two small files next to the original ``model.onnx_data``:
 * ``model_fused.onnx``       – the graph (~160 KB); shared tensors point into
                                ``model.onnx_data`` by offset
 * ``model_fused.onnx_data``  – the 48 merged QKV weights and biases (288 MiB)
+
+With ``attention_chunk > 0`` (default) every ``Attention`` is then rewritten as
+``MatMul`` + ``Split`` + ``MultiHeadAttention`` over query chunks in a ``Loop``
+(:func:`bge_m3_lite.quantize.attention_nodes`), which bounds the attention
+score buffer for long inputs (docs/memory.md); the outputs are unchanged.
 """
 
 from __future__ import annotations
@@ -17,6 +22,9 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+from bge_m3_lite.quantize import ATTENTION_CHUNK, _bump_opset, attention_nodes
 
 NUM_HEADS = 16
 HIDDEN_SIZE = 1024
@@ -43,7 +51,46 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def fuse(model_in: str | Path, out_dir: str | Path | None = None) -> FuseResult:
+def _chunk_attention(model: Any, chunk: int) -> None:
+    """``Attention`` -> ``MatMul`` + ``Split`` + chunked ``MultiHeadAttention``."""
+    from onnx import helper
+
+    _bump_opset(model, 13)
+    new_nodes: list[Any] = []
+    inits: list[Any] = []
+    for node in model.graph.node:
+        if node.op_type != "Attention" or node.domain != "com.microsoft":
+            new_nodes.append(node)
+            continue
+        x, weight, bias, mask = node.input[:4]
+        heads = next(a.i for a in node.attribute if a.name == "num_heads")
+        p = node.name
+        new_nodes += [
+            helper.make_node("MatMul", [x, weight], [f"{p}/qkv"], name=f"{p}/MatMul"),
+            helper.make_node(
+                "Split", [f"{p}/qkv"], [f"{p}/q", f"{p}/k", f"{p}/v"], axis=2
+            ),
+        ]
+        nodes, extra = attention_nodes(
+            p,
+            [f"{p}/q", f"{p}/k", f"{p}/v", bias, mask],
+            heads,
+            node.output[0],
+            chunk=chunk,
+        )
+        new_nodes += nodes
+        inits += extra
+    del model.graph.node[:]
+    model.graph.node.extend(new_nodes)
+    model.graph.initializer.extend(inits)
+
+
+def fuse(
+    model_in: str | Path,
+    out_dir: str | Path | None = None,
+    *,
+    attention_chunk: int = ATTENTION_CHUNK,
+) -> FuseResult:
     """Write ``model_fused.onnx`` + ``model_fused.onnx_data`` next to ``model_in``
     (or into ``out_dir``) and return sizes and digests. Deterministic."""
     try:
@@ -96,6 +143,8 @@ def fuse(model_in: str | Path, out_dir: str | Path | None = None) -> FuseResult:
     # tolerates the omission); the optimizer only adds it in save_model_to_file.
     if not any(o.domain == "com.microsoft" for o in model.opset_import):
         model.opset_import.add(domain="com.microsoft", version=1)
+    if attention_chunk > 0:
+        _chunk_attention(model, attention_chunk)
     del model.metadata_props[:]
     entry = model.metadata_props.add()
     entry.key, entry.value = "bge_m3_lite.source_sha256", _sha256(model_in)

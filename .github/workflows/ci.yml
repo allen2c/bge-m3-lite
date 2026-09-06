@@ -14,6 +14,10 @@ on:
         description: "bench: '|'-separated extra args for `bge-m3-lite quantize`, one build per entry"
         type: string
         default: ""
+      fuse_local:
+        description: "bench: also build the fused fp32 graph from the checked-out code and evaluate it"
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -67,19 +71,40 @@ jobs:
       - run: uv run bge-m3-lite --quiet download
       - name: fetch the shipped int8 asset (may not exist yet before a release)
         run: uv run python -c "from bge_m3_lite import hub; hub.ensure_files((hub.INT8_FILE,), quiet=True)" || echo "::warning::int8 asset not available"
-      - run: uv run python -c "import platform; print(platform.machine(), platform.processor())"; lscpu 2>/dev/null | grep -i -E "model name|flags" | cut -c1-400 || true
+      - name: cpu model
+        id: cpu
+        shell: bash
+        run: |
+          cpu=$(lscpu 2>/dev/null | sed -n 's/^Model name:[ \t]*//p' | head -1)
+          [ -n "$cpu" ] || cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || true)
+          [ -n "$cpu" ] || cpu=$(uv run python -c "import platform; print(platform.processor() or platform.machine())")
+          echo "cpu=$cpu ($(nproc 2>/dev/null || sysctl -n hw.ncpu) vCPU)" >> "$GITHUB_OUTPUT"
+          echo "$cpu"; lscpu 2>/dev/null | grep -i flags | cut -c1-400 || true
       - shell: bash
         run: |
           cd ~/.cache/bge-m3-lite/BAAI--bge-m3
           files="model.onnx model_fused.onnx"; [ -f model_int8.onnx ] && files="$files model_int8.onnx"
-          uv run --project "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/eval_model.py" $files
+          uv run --project "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/eval_model.py" $files | tee "$RUNNER_TEMP/eval.log"
+      - name: fuse (local build)
+        if: ${{ inputs.fuse_local }}
+        shell: bash
+        run: |
+          cd ~/.cache/bge-m3-lite/BAAI--bge-m3
+          mkdir -p local && ln -f model.onnx_data local/model.onnx_data  # ORT rejects symlinks that leave the model dir
+          echo "##### fuse (local build)" | tee -a "$RUNNER_TEMP/eval.log"
+          uv run --project "$GITHUB_WORKSPACE" bge-m3-lite --quiet fuse --output local
+          uv run --project "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/eval_model.py" local/model_fused.onnx | tee -a "$RUNNER_TEMP/eval.log"
       - name: quantize variants
         if: ${{ inputs.quantize_variants != '' }}
         shell: bash
         run: |
           IFS='|' read -ra variants <<< "${{ inputs.quantize_variants }}"
           for v in "${variants[@]}"; do
-            echo "##### quantize $v"
+            echo "##### quantize $v" | tee -a "$RUNNER_TEMP/eval.log"
             uv run bge-m3-lite --quiet quantize --output /tmp/variant.onnx $v
-            uv run tools/eval_model.py /tmp/variant.onnx
+            uv run tools/eval_model.py /tmp/variant.onnx | tee -a "$RUNNER_TEMP/eval.log"
           done
+      - name: summary table
+        if: always()
+        shell: bash
+        run: uv run tools/bench_summary.py "$RUNNER_TEMP/eval.log" "${{ matrix.os }}" "${{ steps.cpu.outputs.cpu }}" >> "$GITHUB_STEP_SUMMARY"

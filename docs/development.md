@@ -18,6 +18,8 @@ uv sync --group ref                      # torch, transformers, sentencepiece, F
 uv run tools/make_tokenizer_fixtures.py  # tests/fixtures/tokenizer_cases.json
 uv run tools/make_embedding_fixtures.py  # tests/fixtures/embeddings_ref.{json,npz}
 uv run tools/gen_grapheme_tables.py DIR  # DIR holds the Unicode 16 data files
+uv run tools/make_heldout.py             # tests/fixtures/heldout_* from the fp32 fused graph (no ref stack)
+uv run tools/eval_model.py MODEL.onnx    # accuracy on both sets + tok/s; CI bench turns this into a table
 ```
 
 `tests/fixtures/GraphemeBreakTest.txt` is the official Unicode test file.
@@ -36,8 +38,11 @@ docker run --rm --platform linux/arm64 -v $PWD:/src:ro python:3.12-slim sh -c \
    model asset changed, pin its size + SHA-256 and release URL in `hub.py`.
 2. Run every check above, including the slow suite. New int8 recipes must be
    validated on the CI `bench` matrix first (`workflow_dispatch`, input
-   `quantize_variants`, e.g. `--alpha 0.65|--method dynamic`): int8 accuracy
-   differs between CPUs, the development machine is not representative.
+   `quantize_variants`, e.g. `--alpha 0.65|--method dynamic`; `fuse_local`
+   also builds and times the fused fp32 graph from the checked-out code).
+   The job summary shows the CPU model and one accuracy + tok/s row per
+   graph: `ubuntu-latest` alternates between a Xeon (VNNI) and an EPYC (AVX2),
+   and the development machine (Apple Silicon) is not representative.
 3. Tag and push; `release.yml` runs the checks, publishes to PyPI via trusted
    publishing (environment `pypi`) and creates the GitHub release:
    ```bash

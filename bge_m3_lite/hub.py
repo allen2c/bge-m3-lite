@@ -229,15 +229,59 @@ def _finish(part: Path, dest: Path, remote: RemoteFile) -> Path:
     return dest
 
 
+RETRIES = 3  # attempts per file; HF answers 429 after many downloads in a day
+BACKOFF = 2.0  # seconds, doubled after every failed attempt
+
+
 def _download_locked(
     remote: RemoteFile, dest: Path, part: Path, *, quiet: bool
 ) -> Path:
     url = file_url(remote)
+    for attempt in range(1, RETRIES + 1):
+        try:
+            _fetch(url, remote, part, quiet=quiet)
+            break
+        except (urllib.error.URLError, OSError) as exc:
+            if attempt == RETRIES or not _retryable(exc):
+                hint = ""
+                if "CERTIFICATE_VERIFY_FAILED" in str(exc):
+                    hint = (
+                        " (no CA certificates for this Python: run the bundled "
+                        '"Install Certificates.command" on macOS python.org builds, '
+                        "or pip install certifi)"
+                    )
+                raise RuntimeError(f"failed to download {url}: {exc}{hint}") from exc
+            delay = _retry_delay(exc, attempt)
+            if not quiet:
+                print(
+                    f"\n{remote.name}: {exc}; retry {attempt}/{RETRIES - 1} "
+                    f"in {delay:.0f}s",
+                    file=sys.stderr,
+                )
+            time.sleep(delay)
+    return _finish(part, dest, remote)
+
+
+def _retryable(exc: BaseException) -> bool:
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code == 429 or exc.code >= 500
+    return "CERTIFICATE_VERIFY_FAILED" not in str(exc)  # network / timeout
+
+
+def _retry_delay(exc: BaseException, attempt: int) -> float:
+    if isinstance(exc, urllib.error.HTTPError):
+        try:
+            return min(float(exc.headers.get("Retry-After", "")), 120.0)
+        except ValueError:
+            pass
+    return BACKOFF * 2 ** (attempt - 1)
+
+
+def _fetch(url: str, remote: RemoteFile, part: Path, *, quiet: bool) -> None:
+    """One (resumable) attempt: append to ``part`` until it holds ``remote.size``."""
     offset = part.stat().st_size if part.exists() else 0
     if offset == remote.size:
-        return _finish(
-            part, dest, remote
-        )  # fully downloaded, interrupted before verify
+        return  # fully downloaded, interrupted before verify
     if offset > remote.size:
         offset = 0
         part.unlink()
@@ -246,30 +290,19 @@ def _download_locked(
         headers["Range"] = f"bytes={offset}-"
     req = urllib.request.Request(url, headers=headers)
     start = time.monotonic()
-    try:
-        with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as resp:
-            if offset and resp.status != 206:
-                offset = 0  # server ignored the range; start over
-            with open(part, "ab" if offset else "wb") as fh:
-                done = offset
-                while True:
-                    chunk = resp.read(1 << 20)
-                    if not chunk:
-                        break
-                    fh.write(chunk)
-                    done += len(chunk)
-                    if not quiet:
-                        _progress(remote.name, done, remote.size, start)
-    except (urllib.error.URLError, OSError) as exc:
-        hint = ""
-        if "CERTIFICATE_VERIFY_FAILED" in str(exc):
-            hint = (
-                " (no CA certificates for this Python: run the bundled "
-                '"Install Certificates.command" on macOS python.org builds, '
-                "or pip install certifi)"
-            )
-        raise RuntimeError(f"failed to download {url}: {exc}{hint}") from exc
-    return _finish(part, dest, remote)
+    with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as resp:
+        if offset and resp.status != 206:
+            offset = 0  # server ignored the range; start over
+        with open(part, "ab" if offset else "wb") as fh:
+            done = offset
+            while True:
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                fh.write(chunk)
+                done += len(chunk)
+                if not quiet:
+                    _progress(remote.name, done, remote.size, start)
 
 
 def _ssl_context() -> ssl.SSLContext:

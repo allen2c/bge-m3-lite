@@ -65,8 +65,15 @@ does not help (0.38 s → 0.33 s for session creation), see `roadmap.md`.
 
 ## Memory
 
-The hidden state of one batch is `padded_tokens × 4 KiB`; unfused attention
-additionally materialises `batch × 16 × seq² × 4 bytes` per layer (4 GiB for
-a single 8192-token text). `encode(..., max_batch_tokens=16384)` (default)
-bounds the padded tokens per batch, so mixed inputs are safe; lower it for
-long documents on small machines.
+The hidden state of one batch is `padded_tokens × 4 KiB`. Since v0.4 attention
+runs in query chunks of 512 (`memory.md`): one 8192-token text peaks at
+2.5 GB RSS with either backbone (7.4–11.7 GB before). `encode(...,
+max_batch_tokens=16384)` (default) bounds the padded tokens per batch, so
+mixed inputs are safe; lower it for long documents on small machines.
+
+## Held-out set
+
+`tests/fixtures/heldout_*` (40 texts, `calibration.md`) is evaluated by
+`tools/eval_model.py` next to the 11 FlagEmbedding texts; the fp32 fused
+graph reproduces its own reference exactly, the int8 numbers are in
+`quantization.md`.

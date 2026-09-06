@@ -57,9 +57,45 @@ step is gated by the fixtures in `tests/fixtures/` staying green.
   needs it), `quantize` gained `--method/--alpha/--calibration`, and the CI
   `bench` job accepts a `quantize_variants` matrix.
 
+## v0.4.0 — memory, int8 speed, evaluation (in progress)
+
+Everything below is implemented and measured on the M4 (2026-09-06); the
+release waits for one CI `bench` run (`fuse_local` + default `quantize`) to
+confirm the x86/ARM numbers, then new `model_fused.*` and `model_int8.onnx`
+assets are pinned.
+
+| goal | result |
+|---|---|
+| long inputs must not need 4 GiB | attention in query chunks (`Loop`, 512 rows): 8192 tokens 7.4 GB → 2.5 GB, bit-exact, ≤ 3 % on short inputs (`memory.md`) |
+| int8 element-wise overhead | per-axis `QuantizeLinear` + `MatMulIntegerToFloat`: +11 % on the M4, same accuracy; the ORT-fusable per-tensor form is out of reach (per-row zero point unsupported), `--symmetric` gets closer but loses accuracy (`quantization.md`) |
+| sparse int8 accuracy | measured, not fixed: the flips are fp32 near-ties (gap 0.001–0.009); last-layer-fp32 variants change ±1 text, so the recipe stays; `--keep-fp32` remains for experiments |
+| calibration provenance | 212 hand-written + 360 MIRACL passages, licence and recipe in `calibration.md`; 40-text held-out set disjoint from calibration, reported by `tools/eval_model.py` |
+| engineering | `hub.py` retries 429/5xx/timeouts with back-off; the CI `bench` summary prints the CPU model and one accuracy + tok/s row per graph |
+
+## v0.4.x candidates (measure first)
+
+- x86 numbers for v0.4 from the bench matrix; if the Xeon gain is below
+  +20 %, profile the remaining scalar ops (`ReduceMax/ReduceMin` are two
+  extra passes; `MaxPool`-style fused min/max does not exist in ORT).
+- `attention_chunk` per platform: 512 was chosen on the M4; the CI matrix
+  may prefer 1024 (fewer iterations) on 4-vCPU runners.
+- Start-up of the int8 graph (1.1 s vs 0.4 s fp32): 2 700 nodes cost ORT
+  session time; folding the scalar scale/zero-point chain into fewer ops
+  would also help here.
+
+## v0.5 ideas (not started)
+
+- Chunk the FFN too (`Loop` over token blocks) so the 16 KiB/token
+  intermediate stops scaling with batch length; only matters above 32k
+  padded tokens per batch.
+- Sparse head in fp32 with a re-quantised last hidden state: the measured
+  near-ties suggest dithering rather than precision is the issue; a
+  calibrated per-token rounding offset could be tested with the held-out set.
+- Weight-only int8 (`--method nbits --bits 8 --accuracy-level 4`) on
+  Apple Silicon, where int8 GEMM is slower than fp32 SGEMM: not a speed
+  path, only a memory one.
+
 ## Later
 
-- Rust/maturin kernels: only if onnxruntime is still the bottleneck after v0.3
+- Rust/maturin kernels: only if onnxruntime is still the bottleneck
   (the pure-Python tokenizer and the fixtures are the correctness contract).
-- Long-context memory: chunked attention would need graph surgery; until then
-  the token budget is the tool.

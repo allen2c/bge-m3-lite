@@ -9,6 +9,7 @@ from pathlib import Path
 
 from bge_m3_lite import __version__, hub
 from bge_m3_lite.embedder import BATCH_SIZE, MAX_BATCH_TOKENS, MAX_LENGTH
+from bge_m3_lite.quantize import ATTENTION_CHUNK
 
 
 def _cmd_download(args: argparse.Namespace) -> int:
@@ -47,6 +48,9 @@ def _cmd_quantize(args: argparse.Namespace) -> int:
         accuracy_level=args.accuracy_level,
         quantize_embeddings=not args.keep_embeddings,
         smooth_alpha=None if args.no_smooth else args.alpha,
+        symmetric=args.symmetric,
+        attention_chunk=args.attention_chunk,
+        keep_fp32=tuple(args.keep_fp32 or ()),
     )
     texts = load_calibration_texts(args.calibration) if args.calibration else None
     tokenizer = hub.ensure_files(hub.TOKENIZER_FILES, args.cache_dir, quiet=True)
@@ -65,7 +69,9 @@ def _cmd_fuse(args: argparse.Namespace) -> int:
     from bge_m3_lite.fuse import fuse
 
     files = hub.ensure_files(hub.MODEL_FILES, args.cache_dir, quiet=args.quiet)
-    result = fuse(files["model.onnx"], args.output)
+    result = fuse(
+        files["model.onnx"], args.output, attention_chunk=args.attention_chunk
+    )
     out = args.output or files["model.onnx"].parent
     for name, size, digest in (
         ("model_fused.onnx", result.graph_size, result.graph_sha256),
@@ -179,12 +185,39 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument(
         "--calibration", type=Path, default=None, help="one text per line (utf-8)"
     )
+    q.add_argument(
+        "--attention-chunk",
+        type=int,
+        default=ATTENTION_CHUNK,
+        metavar="N",
+        help="query rows per attention pass (0 = whole sequence)",
+    )
+    q.add_argument(
+        "--symmetric",
+        action="store_true",
+        help="rowwise only: symmetric per-row activations (faster, less exact)",
+    )
+    q.add_argument(
+        "--keep-fp32",
+        action="append",
+        default=None,
+        metavar="REGEX",
+        help="rowwise only: leave MatMul/Attention nodes matching this node-name "
+        "regex in fp32 (repeatable)",
+    )
     q.set_defaults(func=_cmd_quantize)
     f = sub.add_parser(
         "fuse",
         help='build the fused fp32 graph (needs pip install "bge-m3-lite[quant]")',
     )
     f.add_argument("--output", type=Path, default=None, help="default: cache dir")
+    f.add_argument(
+        "--attention-chunk",
+        type=int,
+        default=ATTENTION_CHUNK,
+        metavar="N",
+        help="query rows per attention pass (0 = whole sequence, ORT Attention op)",
+    )
     f.set_defaults(func=_cmd_fuse)
     return parser
 

@@ -30,8 +30,12 @@ from typing import Any, Literal
 import numpy as np
 
 CALIBRATION_FILE = Path(__file__).with_name("calibration.txt")
+CALIBRATION_EXTRA = Path(__file__).with_name(
+    "calibration_miracl.txt"
+)  # docs/calibration.md
+ATTENTION_CHUNK = 512  # see docs/memory.md
 SMOOTH_TARGETS = (  # node-name patterns of the projections to smooth (fused graph)
-    r"^Attention_\d+$",  # merged QKV projection
+    r"^Attention_\d+(/MatMul)?$",  # merged QKV projection (chunked: its MatMul)
     r"attention/output/dense/MatMul$",
     r"/intermediate/dense/MatMul$",  # FFN in
     r"layer\.\d+/output/dense/MatMul$",  # FFN out
@@ -47,11 +51,21 @@ class QuantConfig:
     quantize_embeddings: bool = True  # also quantise the word-embedding Gather
     smooth_alpha: float | None = 0.5  # SmoothQuant strength, None = off
     calibration_max_length: int = 512
+    symmetric: bool = False  # rowwise: fixed zero point 128 instead of per-row
+    attention_chunk: int = ATTENTION_CHUNK  # query rows per attention pass, 0 = off
+    keep_fp32: tuple[
+        str, ...
+    ] = ()  # regexes on node name: leave these MatMul/Attention fp32
 
 
-def load_calibration_texts(path: str | Path = CALIBRATION_FILE) -> list[str]:
-    with open(path, encoding="utf-8") as fh:
-        return [line.rstrip("\n") for line in fh if line.strip()]
+def load_calibration_texts(path: str | Path | None = None) -> list[str]:
+    """Texts of ``path``, or the bundled set (hand-written + MIRACL sample)."""
+    paths = [Path(path)] if path is not None else [CALIBRATION_FILE, CALIBRATION_EXTRA]
+    texts: list[str] = []
+    for p in paths:
+        with open(p, encoding="utf-8") as fh:
+            texts += [line.rstrip("\n") for line in fh if line.strip()]
+    return texts
 
 
 def quantize(
@@ -107,7 +121,13 @@ def quantize(
             config.smooth_alpha,
         )
     if config.method == "rowwise":
-        _quantize_rowwise(model, quantize_embeddings=config.quantize_embeddings)
+        _quantize_rowwise(
+            model,
+            quantize_embeddings=config.quantize_embeddings,
+            zero_point=not config.symmetric,
+            keep_fp32=config.keep_fp32,
+            attention_chunk=config.attention_chunk,
+        )
         onnx.save_model(model, str(model_out))
     elif config.method == "dynamic":
         quantize_dynamic(
@@ -244,22 +264,160 @@ def _smooth(model: Any, stats: dict[str, np.ndarray], alpha: float) -> None:
 # ORT's ``quantize_dynamic`` quantises activations per *tensor*. Its
 # ``DynamicQuantizeMatMul`` kernel on Apple Silicon (KleidiAI) silently switches
 # to per-row scales and is far more accurate (dense cosine 0.998 vs 0.983 on
-# every other CPU). The graph below spells that per-row scheme out with
-# standard ops so every platform computes the same thing:
+# every other CPU). The graph below spells that per-row scheme out so every
+# platform computes the same thing, using the two ops ORT can run per row:
 #
 #   Xr = Reshape(X, [-1, K]);  s = (max Xr - min Xr) / 255 per row;  z = -min / s
-#   Q  = uint8(round(Xr / s) + z)
-#   Y  = s * (MatMulInteger(Q, Wq) - z * colsum(Wq)) * w_scale
+#   Q  = QuantizeLinear(Xr, s, z, axis=0)                      (uint8, per row)
+#   Y  = s * (MatMulIntegerToFloat(Q, Wq, 1, w_scale, 0, 128) - z * colsum(Wq))
 #
-# ``MatMulInteger`` has no per-row zero point, hence the ``colsum`` correction.
-# Weights are per-column symmetric int8 stored as uint8 with zero point 128
-# (removed by ``MatMulInteger`` itself): the u8·s8 AVX2 kernel saturates its
-# int16 intermediates, u8·u8 does not, and the integer results are identical.
-# Signed int8 activations (``zero_point=False``) lose a bit and are 5x slower
-# on x86 (no s8·s8 kernel); both switches stay only for the tests.
+# ``MatMulIntegerToFloat`` (u8 x u8 with a per-column ``b_zero_point`` of 128:
+# MLAS's AVX2 u8·s8 kernel saturates its int16 intermediates, u8·u8 does not)
+# folds the int32 -> float cast and the weight scale; it takes a per-row
+# ``a_scale`` but only a scalar ``a_zero_point``, hence the ``colsum``
+# correction for the per-row zero point. ``zero_point=False`` is the symmetric
+# variant: scale = max|x| / 127, a fixed zero point of 128, no correction (three
+# fewer passes over the (M, N) output, half a bit less precision).
 # The merged QKV ``Attention`` becomes the same projection + ``MultiHeadAttention``.
 
 _QI8_MAX = 127.0
+_ROWWISE_OPSET = 13  # per-axis QuantizeLinear
+
+
+def _bump_opset(model: Any, version: int) -> None:
+    """Raise the default-domain opset of the fused graph (opset 11) to 13.
+
+    Only ``Unsqueeze`` and ``ReduceSum`` in that graph changed signature (their
+    ``axes`` attribute became an input).
+    """
+    from onnx import numpy_helper
+
+    cur = next((o for o in model.opset_import if o.domain == ""), None)
+    if cur is None or cur.version >= version:
+        return
+    cur.version = version
+    for node in model.graph.node:
+        if node.domain == "" and node.op_type in ("Unsqueeze", "ReduceSum"):
+            axes = next((a for a in node.attribute if a.name == "axes"), None)
+            if axes is None:
+                continue
+            name = f"{node.name or node.output[0]}/axes"
+            model.graph.initializer.append(
+                numpy_helper.from_array(np.array(axes.ints, dtype=np.int64), name)
+            )
+            node.attribute.remove(axes)
+            node.input.append(name)
+    if model.ir_version < 7:
+        model.ir_version = 7
+
+
+# -- attention in query chunks -------------------------------------------------
+#
+# ORT's CPU ``Attention`` / ``MultiHeadAttention`` allocate the full score
+# matrix ``batch x heads x S x S`` (4 GiB for one 8192-token text). Softmax is
+# per query row, so running the same op on ``chunk`` query rows at a time
+# against the full K/V is exact and caps that buffer at
+# ``batch x heads x chunk x S``. A ``Loop`` keeps the graph static: one
+# iteration for texts up to ``chunk`` tokens (no measurable overhead), ceil(S /
+# chunk) iterations otherwise; the outputs are concatenated on the way.
+
+
+def attention_nodes(
+    prefix: str,
+    inputs: list[str],
+    num_heads: int,
+    out: str,
+    *,
+    chunk: int = ATTENTION_CHUNK,
+) -> tuple[list[Any], list[Any]]:
+    """``(nodes, initializers)`` computing ``MultiHeadAttention(inputs)``.
+
+    ``inputs`` are ``[q, k, v, bias, key_padding_mask]``; the graph must be
+    opset 13 (see :func:`_bump_opset`).
+    """
+    import onnx
+    from onnx import helper, numpy_helper
+
+    mk = helper.make_node
+    if chunk <= 0:
+        node = mk(
+            "MultiHeadAttention",
+            inputs,
+            [out],
+            domain="com.microsoft",
+            num_heads=num_heads,
+            name=f"{prefix}/mha",
+        )
+        return [node], []
+    q = inputs[0]
+    p = prefix
+    inits: list[Any] = []
+
+    def c64(name: str, values: list[int]) -> str:
+        inits.append(numpy_helper.from_array(np.array(values, dtype=np.int64), name))
+        return name
+
+    c_chunk = c64(f"{p}/chunk", [chunk])
+    c_chunk1 = c64(f"{p}/chunk-1", [chunk - 1])
+    c_0, c_1, c_2, c_3 = (c64(f"{p}/{i}", [i]) for i in range(4))
+    inits.append(numpy_helper.from_array(np.array(True), f"{p}/true"))
+    nodes = [
+        mk("Shape", [q], [f"{p}/qshape"]),
+        mk("Slice", [f"{p}/qshape", c_1, c_2], [f"{p}/S"]),
+        mk("Add", [f"{p}/S", c_chunk1], [f"{p}/S+"]),
+        mk("Div", [f"{p}/S+", c_chunk], [f"{p}/trips"]),
+        mk("Squeeze", [f"{p}/trips", c_0], [f"{p}/trip"]),
+        mk("Slice", [f"{p}/qshape", c_0, c_1], [f"{p}/B"]),
+        mk("Slice", [f"{p}/qshape", c_2, c_3], [f"{p}/H"]),
+        mk("Concat", [f"{p}/B", c_0, f"{p}/H"], [f"{p}/acc_shape"], axis=0),
+        mk(
+            "ConstantOfShape",
+            [f"{p}/acc_shape"],
+            [f"{p}/acc0"],
+            value=helper.make_tensor("v", onnx.TensorProto.FLOAT, [1], [0.0]),
+        ),
+    ]
+    # body(i, cond, acc) -> (cond, acc ++ MHA(q[:, i*chunk : (i+1)*chunk]))
+    body = helper.make_graph(
+        [
+            mk("Unsqueeze", [f"{p}/i", c_0], [f"{p}/i1"]),
+            mk("Mul", [f"{p}/i1", c_chunk], [f"{p}/start"]),
+            mk("Add", [f"{p}/start", c_chunk], [f"{p}/end"]),  # Slice clamps to S
+            mk("Slice", [q, f"{p}/start", f"{p}/end", c_1], [f"{p}/qc"]),
+            mk(
+                "MultiHeadAttention",
+                [f"{p}/qc", *inputs[1:]],
+                [f"{p}/oc"],
+                domain="com.microsoft",
+                num_heads=num_heads,
+                name=f"{p}/mha",
+            ),
+            mk("Concat", [f"{p}/acc", f"{p}/oc"], [f"{p}/acc_next"], axis=1),
+            mk("Identity", [f"{p}/cond"], [f"{p}/cond_next"]),
+        ],
+        f"{p}/body",
+        [
+            helper.make_tensor_value_info(f"{p}/i", onnx.TensorProto.INT64, []),
+            helper.make_tensor_value_info(f"{p}/cond", onnx.TensorProto.BOOL, []),
+            helper.make_tensor_value_info(f"{p}/acc", onnx.TensorProto.FLOAT, None),
+        ],
+        [
+            helper.make_tensor_value_info(f"{p}/cond_next", onnx.TensorProto.BOOL, []),
+            helper.make_tensor_value_info(
+                f"{p}/acc_next", onnx.TensorProto.FLOAT, None
+            ),
+        ],
+    )
+    nodes.append(
+        mk(
+            "Loop",
+            [f"{p}/trip", f"{p}/true", f"{p}/acc0"],
+            [out],
+            body=body,
+            name=f"{p}/loop",
+        )
+    )
+    return nodes, inits
 
 
 def _quantize_rowwise(
@@ -267,15 +425,22 @@ def _quantize_rowwise(
     *,
     quantize_embeddings: bool,
     zero_point: bool = True,
-    weight_uint8: bool = True,
+    keep_fp32: tuple[str, ...] = (),
+    attention_chunk: int = ATTENTION_CHUNK,
 ) -> None:
     import onnx
     from onnx import helper, numpy_helper
 
+    _bump_opset(model, _ROWWISE_OPSET)
     graph = model.graph
     inits = {t.name: t for t in graph.initializer}
     consts: list[Any] = []
     new_nodes: list[Any] = []
+
+    def keep(node: Any) -> bool:
+        # smoothing (if any) already ran and is exact in fp32, so a kept node
+        # simply stays a plain fp32 MatMul/Attention.
+        return any(re.search(p, node.name) for p in keep_fp32)
 
     def const(name: str, value: np.ndarray) -> str:
         consts.append(numpy_helper.from_array(value, name))
@@ -286,82 +451,85 @@ def _quantize_rowwise(
     )
     c_eps = const("rowwise/eps", np.array(1e-10, dtype=np.float32))
     c_zero = const("rowwise/zero", np.array(0.0, dtype=np.float32))
+    c_one = const("rowwise/one", np.array(1.0, dtype=np.float32))
+    c_flat = const("rowwise/flat", np.array([-1], dtype=np.int64))
     c_slice0 = const("rowwise/s0", np.array([0], dtype=np.int64))
     c_slice2 = const("rowwise/s2", np.array([2], dtype=np.int64))
+    c_a_zp = const("rowwise/a_zp", np.array(0 if zero_point else 128, dtype=np.uint8))
+    c_zp128 = helper.make_tensor("v", onnx.TensorProto.UINT8, [1], [128])
 
     def rowwise_matmul(prefix: str, x: str, w_name: str, out: str) -> list[Any]:
-        """Nodes computing ``out = x @ W`` with per-row int8 activations."""
+        """Nodes computing ``out = x @ W`` with per-row uint8 activations."""
         w = numpy_helper.to_array(inits[w_name]).astype(np.float32)  # (K, N)
         k, n = w.shape
         w_scale = np.maximum(np.abs(w).max(axis=0) / _QI8_MAX, 1e-12)
         w_q = np.clip(np.round(w / w_scale), -_QI8_MAX, _QI8_MAX).astype(np.int8)
-        mm_inputs = [f"{prefix}/xq", w_name]
-        if weight_uint8:
-            inits[w_name].CopyFrom(
-                numpy_helper.from_array(
-                    (w_q.astype(np.int16) + 128).astype(np.uint8), w_name
-                )
+        inits[w_name].CopyFrom(
+            numpy_helper.from_array(
+                (w_q.astype(np.int16) + 128).astype(np.uint8), w_name
             )
-            mm_inputs += [
-                const(
-                    f"{prefix}/a_zp",
-                    np.array(0, dtype=np.uint8 if zero_point else np.int8),
-                ),
-                const(f"{prefix}/b_zp", np.full((n,), 128, dtype=np.uint8)),
-            ]
-        else:
-            inits[w_name].CopyFrom(numpy_helper.from_array(w_q, w_name))
-        ws = const(f"{prefix}/w_scale", w_scale.astype(np.float32).reshape(1, n))
+        )
+        ws = const(f"{prefix}/w_scale", w_scale.astype(np.float32))
+        b_zp = const(f"{prefix}/b_zp", np.full((n,), 128, dtype=np.uint8))
         shp = const(f"{prefix}/shape2d", np.array([-1, k], dtype=np.int64))
         n_const = const(f"{prefix}/n", np.array([n], dtype=np.int64))
         p = prefix
         mk = helper.make_node
-        nodes = [mk("Reshape", [x, shp], [f"{p}/x2d"])]
+        nodes = [
+            mk("Reshape", [x, shp], [f"{p}/x2d"]),
+            mk("ReduceMax", [f"{p}/x2d"], [f"{p}/mx0"], axes=[1], keepdims=1),
+            mk("ReduceMin", [f"{p}/x2d"], [f"{p}/mn0"], axes=[1], keepdims=1),
+        ]
+        mm = [f"{p}/xq", w_name, c_one, ws, c_a_zp, b_zp]
         if zero_point:
             colsum = const(
                 f"{p}/colsum",
-                w_q.astype(np.int32)
-                .sum(axis=0, dtype=np.int32)
+                (w_q.astype(np.int32).sum(axis=0) * w_scale)
                 .astype(np.float32)
                 .reshape(1, n),
             )
             nodes += [
-                mk("ReduceMax", [f"{p}/x2d"], [f"{p}/mx"], axes=[1], keepdims=1),
-                mk("ReduceMin", [f"{p}/x2d"], [f"{p}/mn0"], axes=[1], keepdims=1),
                 mk("Min", [f"{p}/mn0", c_zero], [f"{p}/mn"]),  # range must hold 0
-                mk("Max", [f"{p}/mx", c_zero], [f"{p}/mx0"]),
-                mk("Sub", [f"{p}/mx0", f"{p}/mn"], [f"{p}/range"]),
+                mk("Max", [f"{p}/mx0", c_zero], [f"{p}/mx"]),
+                mk("Sub", [f"{p}/mx", f"{p}/mn"], [f"{p}/range"]),
                 mk("Div", [f"{p}/range", c_qmax], [f"{p}/scale0"]),
-                mk("Max", [f"{p}/scale0", c_eps], [f"{p}/scale"]),
+                mk("Max", [f"{p}/scale0", c_eps], [f"{p}/scale"]),  # (M, 1)
                 mk("Div", [f"{p}/mn", f"{p}/scale"], [f"{p}/negzp"]),
                 mk("Neg", [f"{p}/negzp"], [f"{p}/zp0"]),
                 mk("Round", [f"{p}/zp0"], [f"{p}/zp"]),  # (M, 1) in [0, 255]
-                mk("Div", [f"{p}/x2d", f"{p}/scale"], [f"{p}/xs"]),
-                mk("Round", [f"{p}/xs"], [f"{p}/xr"]),
-                mk("Add", [f"{p}/xr", f"{p}/zp"], [f"{p}/xz"]),
-                mk("Clip", [f"{p}/xz", c_zero, c_qmax], [f"{p}/xc"]),
-                mk("Cast", [f"{p}/xc"], [f"{p}/xq"], to=onnx.TensorProto.UINT8),
-                mk("MatMulInteger", mm_inputs, [f"{p}/y32"]),
-                mk("Cast", [f"{p}/y32"], [f"{p}/yf"], to=onnx.TensorProto.FLOAT),
+                mk("Reshape", [f"{p}/zp", c_flat], [f"{p}/zp1d"]),
+                mk("Cast", [f"{p}/zp1d"], [f"{p}/zpq"], to=onnx.TensorProto.UINT8),
+                mk("Reshape", [f"{p}/scale", c_flat], [f"{p}/scale1d"]),
+                mk(
+                    "QuantizeLinear",
+                    [f"{p}/x2d", f"{p}/scale1d", f"{p}/zpq"],
+                    [f"{p}/xq"],
+                    axis=0,
+                ),
+                mk("MatMulIntegerToFloat", mm, [f"{p}/y0"], domain="com.microsoft"),
                 mk("Mul", [f"{p}/zp", colsum], [f"{p}/corr"]),
-                mk("Sub", [f"{p}/yf", f"{p}/corr"], [f"{p}/yc"]),
-                mk("Mul", [f"{p}/yc", f"{p}/scale"], [f"{p}/ys"]),
+                mk("Sub", [f"{p}/y0", f"{p}/corr"], [f"{p}/yc"]),
+                mk("Mul", [f"{p}/yc", f"{p}/scale"], [f"{p}/y2d"]),
             ]
         else:
             nodes += [
-                mk("Abs", [f"{p}/x2d"], [f"{p}/abs"]),
-                mk("ReduceMax", [f"{p}/abs"], [f"{p}/amax"], axes=[1], keepdims=1),
+                mk("Neg", [f"{p}/mn0"], [f"{p}/nmn"]),
+                mk("Max", [f"{p}/mx0", f"{p}/nmn"], [f"{p}/amax"]),
                 mk("Div", [f"{p}/amax", c_qmax], [f"{p}/scale0"]),
-                mk("Max", [f"{p}/scale0", c_eps], [f"{p}/scale"]),
-                mk("Div", [f"{p}/x2d", f"{p}/scale"], [f"{p}/xs"]),
-                mk("Round", [f"{p}/xs"], [f"{p}/xr"]),  # |xr| <= 127 by construction
-                mk("Cast", [f"{p}/xr"], [f"{p}/xq"], to=onnx.TensorProto.INT8),
-                mk("MatMulInteger", mm_inputs, [f"{p}/y32"]),
-                mk("Cast", [f"{p}/y32"], [f"{p}/yf"], to=onnx.TensorProto.FLOAT),
-                mk("Mul", [f"{p}/yf", f"{p}/scale"], [f"{p}/ys"]),
+                mk("Max", [f"{p}/scale0", c_eps], [f"{p}/scale"]),  # (M, 1)
+                mk("Reshape", [f"{p}/scale", c_flat], [f"{p}/scale1d"]),
+                mk("Shape", [f"{p}/scale1d"], [f"{p}/rows"]),
+                mk("ConstantOfShape", [f"{p}/rows"], [f"{p}/zpq"], value=c_zp128),
+                mk(
+                    "QuantizeLinear",
+                    [f"{p}/x2d", f"{p}/scale1d", f"{p}/zpq"],
+                    [f"{p}/xq"],
+                    axis=0,
+                ),
+                mk("MatMulIntegerToFloat", mm, [f"{p}/y0"], domain="com.microsoft"),
+                mk("Mul", [f"{p}/y0", f"{p}/scale"], [f"{p}/y2d"]),
             ]
         nodes += [
-            mk("Mul", [f"{p}/ys", ws], [f"{p}/y2d"]),
             mk("Shape", [x], [f"{p}/xshape"]),
             mk("Slice", [f"{p}/xshape", c_slice0, c_slice2], [f"{p}/bs"]),
             mk("Concat", [f"{p}/bs", n_const], [f"{p}/yshape"], axis=0),
@@ -370,7 +538,9 @@ def _quantize_rowwise(
         return nodes
 
     for node in graph.node:
-        if node.op_type == "MatMul" and node.input[1] in inits:
+        if keep(node) and node.op_type in ("MatMul", "Attention"):
+            new_nodes.append(node)
+        elif node.op_type == "MatMul" and node.input[1] in inits:
             prefix = f"rowwise/{node.name or node.output[0]}"
             new_nodes.extend(
                 rowwise_matmul(prefix, node.input[0], node.input[1], node.output[0])
@@ -388,15 +558,15 @@ def _quantize_rowwise(
                     axis=2,
                 )
             )
-            new_nodes.append(
-                helper.make_node(
-                    "MultiHeadAttention",
-                    [f"{prefix}/q", f"{prefix}/k", f"{prefix}/v", bias, mask],
-                    [node.output[0]],
-                    domain="com.microsoft",
-                    num_heads=heads,
-                )
+            nodes, extra = attention_nodes(
+                prefix,
+                [f"{prefix}/q", f"{prefix}/k", f"{prefix}/v", bias, mask],
+                heads,
+                node.output[0],
+                chunk=attention_chunk,
             )
+            new_nodes.extend(nodes)
+            consts.extend(extra)
         elif (
             node.op_type == "Gather"
             and quantize_embeddings

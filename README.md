@@ -86,5 +86,8 @@ See `AGENTS.md` and `docs/` (architecture, tokenizer, verification, development)
 
 v0.3.1: fp32 with exact parity with FlagEmbedding (fused graph by default),
 opt-in int8 backbone (row-wise + SmoothQuant, dense cosine 0.999 on every
-platform), retrieval helpers, token-budget batching, Windows. Plan:
-`docs/roadmap.md`.
+platform), retrieval helpers, token-budget batching, Windows. Next (v0.4,
+built and measured, awaiting the CI matrix): attention in query chunks so an
+8192-token text needs 2.5 GB instead of 7 GB, a faster int8 graph, a
+documented calibration corpus and a held-out evaluation set. Plan and
+numbers: `docs/roadmap.md`.
