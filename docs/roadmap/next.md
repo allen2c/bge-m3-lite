@@ -31,8 +31,6 @@ Shipped versions and the facts behind them: `done.md`.
   arena shrink run option (`memory.enable_memory_arena_shrinkage`, no
   effect in the first test) can return memory between requests (disabling
   the arena does not, `../resources.md`).
-- Physical-core detection on Linux/Windows if the CI matrix shows that
-  onnxruntime's default (0) is not the physical core count there.
 - **v0.6 (candidates)** — weight-only int8 `MatMulNBits` for Apple Silicon
   (memory only; int8 GEMM is slower than SGEMM there); embeddings served from
   the mmapped file instead of the int8 `Gather` copy; sparse-head rounding
