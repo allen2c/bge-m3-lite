@@ -54,15 +54,6 @@ v0.4.0 (chunked attention, int8 v4):
 | `ubuntu-24.04-arm` | Neoverse-N2 | 314 tok/s | 1117 tok/s | 3.6× |
 | `macos-latest` (VM) | Apple M1, 3 cores | 142 tok/s | 411 tok/s | 2.9× |
 
-v0.3.1:
-
-| runner | CPU | fp32 fused 128-tok | int8 v3 128-tok | int8 speed-up |
-|---|---|---|---|---|
-| `ubuntu-latest` x86_64 | Xeon Platinum 8573C (AVX-512 VNNI) | ~490 tok/s | 742 tok/s | 1.5× |
-| `ubuntu-latest` x86_64 | AMD EPYC 7763 (AVX2) | 275 tok/s | 352 tok/s | 1.3× |
-| `ubuntu-24.04-arm` | Neoverse-N2 | 316 tok/s | 1120 tok/s | 3.5× |
-| `macos-latest` (VM) | Apple Silicon, 3 cores | 127 tok/s | 319 tok/s | 2.5× |
-
 `ubuntu-latest` alternates between the two x86 CPUs; int8 accuracy is the same
 on every runner (`quantization/measurements.md`).
 
@@ -78,15 +69,20 @@ The macOS runner is a throttled VM; use the M4 numbers above for Apple Silicon.
 | ORT session, fp32 | 0.44 s | 0.44 s |
 | total | 0.86 s | 0.6 s |
 
-Cold start is dominated by reading 2.3 GB of weights; the int8 backbone
-(569 MB) starts in about a third of the time. Saving the ORT-optimised graph
-does not help (0.38 s → 0.33 s for session creation), see `roadmap/done.md`.
+Cold start is dominated by reading 2.3 GB of weights. The int8 session
+opens in 0.31 s since v0.6.1 (0.69 s before: the outer graph shrank from
+2 692 to 1 396 nodes with the layer tail in a `Loop`, `memory.md`); the
+optimisation level makes no difference to either (0.67–0.72 s at every level
+for the v0.5.2 int8 graph), nor does saving the ORT-optimised graph (0.38 s
+→ 0.33 s for fp32), see `roadmap/done.md`.
 
 ## Memory
 
 The hidden state of one batch is `padded_tokens × 4 KiB`. Since v0.4 attention
-runs in query chunks of 512 (`memory.md`): one 8192-token text peaks at
-2.5 GB RSS with either backbone (7.4–11.7 GB before). `encode(...,
+runs in query chunks (256 since v0.5.2) and since v0.6.1 the layer tail in
+256-row windows (`memory.md`): one 8192-token text peaks at 1.8 GB RSS
+with either backbone (7.4–11.7 GB before v0.4) and any batch costs about
+0.07 MiB per padded token on top of the loaded model. `encode(...,
 max_batch_tokens=16384)` (default) bounds the padded tokens per batch, so
 mixed inputs are safe; lower it for long documents on small machines.
 Resident memory per backbone, CPU-seconds per token and the idle cost of a

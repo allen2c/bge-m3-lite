@@ -1,23 +1,23 @@
-# Roadmap: v0.6.1 (next)
+# Roadmap: what is next
 
-Shipped versions and the facts behind them: `done.md`. Every item below is
+Shipped versions and the facts behind them: `done.md`. Every item is
 measured before it is merged (CI `bench` matrix, `tools/bench_serving.py`
-run alone on the M4) and lands only if the numbers say so.
-
-## v0.6.1 — serving follow-ups and the leftovers
-
-| item | what to do | done when |
-|---|---|---|
-| ORT `run_async` versus threads | `session.run_async` from the loop thread instead of `run_in_executor`; measure req/s, p50/p95, CPU/req and loop lag at concurrency 1–8 on fp32 and int8 (`bench_serving.py` gets a mode) | adopted only if it beats the thread pool on the M4 and two runners; otherwise recorded in `../serving/measurements.md` and closed |
-| token-aware micro-batcher | the batcher counts texts, so one long passage in a query batch pads every query to its width; hold a request's token count (tokenize in the worker, or a cheap length estimate) and flush a group at `max_batch_tokens`, or keep long texts out of query batches | mixed query + 600-token burst no slower than the query-only burst; bit-exact test with mixed lengths still green |
-| short-batch activation memory | fp32 batches of texts ≤ 256 tokens cost +20 % since v0.5.2 (three hidden-state copies per layer inside the `Loop`); try a scan output or a single-iteration bypass in `fuse` | `128 × 128` peak back to ≤ 1450 MiB (`../memory.md` table) at unchanged tok/s and bit-exact outputs |
-| int8 node count / start-up | fold the scalar scale / zero-point chain (2 700 outer nodes, 1.1 s start-up on runners vs 0.4 s fp32); the layer loop halves it but costs memory on int8 | start-up ≤ 0.6 s on the M4 without a memory regression in the `../memory.md` int8 columns |
-
-Serving numbers on the CI runners are in `../serving/measurements.md`
-(EPYC 9V74, Neoverse-N2, M1 VM, 2026-09-06).
+and the memory shapes run alone on the M4) and lands only if the numbers say
+so. v0.6.1 closed the four open items (`run_async`, length-aware batching,
+short-batch memory, int8 start-up); nothing is scheduled.
 
 ## Closed decisions (do not reopen without a user report)
 
+- ORT `session.run_async` instead of the thread pool: −25–50 % req/s and a
+  higher p95 at every concurrency, on the M4 and three runners, both
+  precisions (`../serving/measurements.md`); the thread pool stays.
+- The v0.5.2 short-batch memory: an `If` bypass of the single-iteration
+  `Loop` doubles the prepacked weights (+867 MiB; onnxruntime prepacks per
+  kernel instance, subgraphs included); the row `Loop` of v0.6.1 replaced
+  the layout instead (`../memory.md`). 1 024-row windows: same memory, −5 %.
+- int8 start-up: the graph optimisation level does not matter (0.67–0.72 s
+  at every level for 2 700 nodes); the row `Loop` halves the outer node
+  count and the time, so the scalar scale / zero-point chain stays as it is.
 - int8 on Xeon (VNNI): v4 is 0.84× fp32 on 128-token batches, short queries
   still 2× faster; one x86 recipe (u8·u8), no per-CPU assets
   (`../quantization/measurements.md`).
@@ -30,5 +30,7 @@ Serving numbers on the CI runners are in `../serving/measurements.md`
   is slower than SGEMM there); embeddings served from the mmapped file
   instead of the int8 `Gather` copy; sparse-head rounding experiments with
   the held-out set.
+- Token-count buckets in the micro-batcher (the character buckets misjudge
+  CJK text by up to 3×) if a mixed-script service reports padding waste.
 - Rust/maturin kernels only if onnxruntime is still the bottleneck (the
   pure-Python tokenizer and the fixtures are the correctness contract).

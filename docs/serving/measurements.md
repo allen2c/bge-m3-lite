@@ -18,6 +18,7 @@ its next request when the previous one returns; latency as seen by a client.
 | `to_thread` ×8 | 68–72 | 110 / 131 | 132 | 208–213 | 36 / 48 | 43 |
 | `encode(list)` of 4 / 8 / 40 | 122 / 171 / 238 | 33 / 47 / 168 | 28 / 20 / 15 | 150 / 174 / 196 | 27 / 46 / 204 | 20 / 18 / 18 |
 | 4 sessions × 1 thread, ×4 / ×8 | 55 / 68 | 72 / 115 | 72 / 112 | 164 / 222 | 24 / 34 | 24 / 34 |
+| `run_async` ×1 / ×2 / ×4 (v0.6.1) | 41 / 58 / 63 | 26 / 34 / 62 | 33 / 51 / 58 | 58 / 105 / 125 | 17 / 18 / 24 | 24 / 24 / 23 |
 
 | 158-token passages | fp32 req/s | p50 ms | CPU ms/req | int8 req/s | p50 ms | CPU ms/req |
 |---|---|---|---|---|---|---|
@@ -32,7 +33,27 @@ only adds latency, and padding queries into one call is what scales (2.5× at
 flight instead (2.1× at 4, 2.4× at 8; batching loses at every size). For
 passages both precisions gain 25–40 % from 2–4 runs in flight and nothing
 from batching. Four 1-thread sessions lose to one 4-thread session except
-int8 ×8 (+4 % for 4× the memory).
+int8 ×8 (+4 % for 4× the memory). `session.run_async` (the run posted to
+onnxruntime's own pool, awaited through a future; tokenizer and heads on the
+loop thread) loses to the thread pool at every concurrency on both
+precisions and on every runner (−25–50 % req/s, higher p95), saving only
+10–30 % CPU per request: closed in v0.6.1.
+
+## Mixed bursts and the length buckets (v0.6.1, M4, `AsyncEmbedder` defaults)
+
+Bursts of *c* queries sent at once, alone or together with one 602-token
+passage; the queries' latency is the number to watch (`bench_serving.py
+--only burst`). v0.6.0 merged the passage into the queries' batch:
+
+| query burst | fp32 p50 / p95 ms alone | + passage, v0.6.0 | + passage, v0.6.1 | int8 alone | + passage (no batching) |
+|---|---|---|---|---|---|
+| ×2 | 20 / 21 | 1505 / 1758 | 37 / 39 | 15 / 15 | 24 / 41 |
+| ×4 | 31 / 33 | 2553 / 2590 | 57 / 59 | 21 / 24 | 22 / 25 |
+| ×8 | 46 / 67 | 4428 / 4727 | 75 / 77 | 33 / 46 | 32 / 48 |
+
+With the buckets the queries leave as their own call on the second slot;
+what remains (1.6–1.9× the query-only latency on fp32) is the passage's GEMM
+sharing the four threads, as with any two runs in flight.
 
 ## `AsyncEmbedder` (defaults per precision, see `recipe.md`)
 
@@ -54,6 +75,12 @@ int8 ×8 (+4 % for 4× the memory).
 | | int8 | 40 at 25 | 50 / 71 | 92 / 124 | 75 at 55 |
 | Apple M1 VM (3 vCPU) | fp32 | 11 at 95 | 15 / 15 | 20 / 21 | 16 at 261 (threads: 17) |
 | | int8 | 25 at 38 | 39 / 57 | 40 / 39 | 59 at 65 |
+
+`run_async` ×1 / ×2 / ×4 on the same runners (2026-09-07, v0.6.1 bench):
+EPYC 9V45 fp32 19 / 19 / 19 req/s versus `to_thread` 25 / 36 / 34, int8
+33 / 31 / 33 versus 40 / 69 / 79; Neoverse-N2 fp32 8.5 / 14 / 16 versus
+18 / 17 / 20, int8 28 / 54 / 63 versus 41 / 52 / 72; M1 VM fp32 14 / 21 /
+23 versus 23 / 28 / 22, int8 36 / 67 / 70 versus 48 / 74 / 92.
 
 Two-core x86 has no thread gaps to fill and nothing to gain from padding
 (GEMM saturates at one query), so every mode sits within ±15 % there; ARM

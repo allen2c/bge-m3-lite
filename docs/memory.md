@@ -46,53 +46,69 @@ per-layer score buffer for an 8192-token text is `16 × 256 × 8192 × 4 B` =
 
 ## What still costs memory
 
-- Weights: fp32 is mmap'd from `model.onnx_data` (RSS grows as pages are
-  touched); int8 loads its 569 MB file fully, plus ORT's arena for the
-  2 700-node graph (1.8 GB resident after loading).
+- Weights: fp32 is mmap'd from `model.onnx_data` and prepacked by MLAS
+  (1.3 GB resident after loading, `resources.md`); int8 maps its 569 MB
+  file the same way (0.7 GB).
 - Hidden states and FFN intermediates: `padded_tokens × 4 KiB` and
-  `padded_tokens × 16 KiB` per layer, i.e. 160 MiB at 8192 tokens (v0.5.2
-  bounds the FFN part to `batch × chunk × 16 KiB`, below).
+  `padded_tokens × 16 KiB` per layer, i.e. 160 MiB at 8192 tokens (since
+  v0.6.1 the FFN part is bounded to `256 rows × 16 KiB`, below).
 - `encode(..., max_batch_tokens=16384)` still bounds the padded tokens per
   batch; lower it on small machines.
 
-## v0.5.2: the whole layer inside the `Loop` (M4, one `encode`, peak − RSS after load)
+## v0.5.2: the whole layer inside the attention `Loop` (superseded)
 
-`fuse` now moves the rest of each layer (output projection, SkipLayerNorm,
-FFN, SkipLayerNorm; all per token) into the attention `Loop` body, slicing the
-residual like the query rows (`quantize.layer_tail_into_loop`; `fuse
---no-layer-loop` keeps the v0.4 layout, `quantize --layer-loop` applies it to
-int8). Outputs are bit-identical (dense, sparse, ColBERT; fp32 and int8),
-16/128-token batches within ±1 %, 512-token texts −4 % (two iterations of
-256), one 8192-token text +10 % wall. CI runners agree (128-token tok/s, v0.5.1
-→ v0.5.2 graph): EPYC 7763 269 → 268, Neoverse-N2 317 → 312, M1 VM 339 → 364.
+`fuse --tail loop` moves the rest of each layer (output projection,
+SkipLayerNorm, FFN, SkipLayerNorm; all per token) into the attention `Loop`
+body, slicing the residual like the query rows (`quantize.layer_tail_into_loop`).
+Bit-identical outputs; 16/128-token batches within ±1 %, 512-token texts −4 %,
+one 8192-token text +10 % wall. What sets the peak: onnxruntime's memory
+pattern only applies from the second run of a shape; the first run of a new
+shape allocates from the BFC arena, which grows in powers of two and never
+shrinks (`memory.enable_memory_arena_shrinkage` and `kSameAsRequested`
+measured: no gain, or worse). So the per-token cost is the arena's high-water
+mark, set by the allocation *sequence*: the same rewrite at chunk 512 cost
++15–23 %, at chunk 256 it saved a third for texts longer than the chunk and
+cost +20 % for batches of texts no longer than the chunk (three hidden-state
+copies per iteration: residual slice, `Concat` accumulator, loop output) —
+the int8 graph lost at every shape and shipped without it.
 
-What actually sets the peak: onnxruntime's memory pattern only applies from the
-second run of a shape; the first run of a new shape allocates from the BFC
-arena, which grows in powers of two (1 + 32 + 32 + 64 + 128 + 256 + 512 MiB
-for one 8192-token text) and never shrinks (`memory.enable_memory_arena_shrinkage`
-and `kSameAsRequested` measured: no gain, or worse). So the per-token cost is
-the arena's high-water mark, not the sum of live buffers, and it moves with the
-allocation *sequence*: the same rewrite at chunk 512 costs +15–23 %, at chunk 256
-it saves a third for texts longer than the chunk.
+## v0.6.1: the layer tail in a `Loop` over rows of the flattened batch
 
-| tokens × texts | fp32 v0.5.1 (chunk 512) | fp32 v0.5.2 (256, tail in loop) | int8 v0.5.1 | int8 v0.5.2 (256) | int8 256 + tail in loop |
-|---|---|---|---|---|---|
-| 1024 × 1 | 104 MiB (104 KiB/tok) | 72 (72) | | | |
-| 8192 × 1 | 835 (104) | 567 (71) | 690 (86) | 637 (80) | 716 (90) |
-| 2048 × 4 | 766 (96) | 512 (64) | | | |
-| 1024 × 16 | 1526 (95) | 1025 (64) | 1233 (77) | 1150 (72) | 1309 (82) |
-| 512 × 32 | 1997 (125) | 1197 (75) | 1739 (109) | 1162 (73) | 1385 (87) |
-| 256 × 64 | 1443 (90) | 1731 (108) | 1192 (74) | 1192 (74) | 1479 (92) |
-| 128 × 128 | 1442 (90) | 1731 (108) | | | |
+`fuse` and `quantize` (`--tail rows`, the default; `loop` and `none` keep
+the older layouts) run the per-token tail of every layer in a second `Loop`
+over 256 rows of the `(1, batch × seq, hidden)` activations
+(`quantize.layer_tail_row_loop`); the attention `Loop` keeps chunking the
+query rows. The FFN intermediate is then `256 × 16 KiB` for every batch
+shape, where the v0.5.2 body still ran the tail on `batch × chunk` rows
+(`128 × 128`: 256 MiB per intermediate). The body's result is a *scan
+output*: onnxruntime writes each window into one buffer, no `Concat`
+accumulator, no copy out of the loop. Scan outputs need one shape per
+iteration, so the last window is shifted back to 256 full rows (up to 255
+rows recomputed) and the outer graph reassembles the rows with two `Slice`
+and a `Concat`. Outputs are bit-identical (fixtures, held-out set, fp32 and
+int8; the int8 weight file is unchanged since v0.5.0).
 
-Texts no longer than the chunk (one iteration) pay for the extra copies the
-loop makes of the hidden state (residual slice, accumulator, loop output):
-+20 % for fp32. The int8 graph (30 small ops per projection) loses with the
-tail inside the loop at every shape, so int8 ships chunk 256 without it
-(start-up would drop from 0.75 s to 0.35 s with it; 512-token texts −3 %).
-Rule of thumb since v0.5.2: **peak ≈ RSS after load + 0.11 MiB × padded tokens
-per batch** for short texts, **0.07–0.08 MiB** for texts of 512+ tokens; a
-budget of `H` MiB allows `max_batch_tokens ≈ H / 0.11`. The arena keeps the
-largest buffer set, so the peak is reached once and stays. Concurrent runs
-(`serving/recipe.md`) each add their own set: 626-token texts cost +41 MiB (fp32) /
-+38 MiB (int8) per extra run in flight, i.e. the 0.07 MiB rule per run.
+| tokens × texts, M4, one `encode`, peak − RSS after load | fp32 v0.5.2 | fp32 v0.6.1 | int8 v0.5.2 | int8 v0.6.1 |
+|---|---|---|---|---|
+| 128 × 128 | 1734 MiB (108 KiB/tok) | **941** (59) | 1207 (75) | **1076** (67) |
+| 256 × 64 | 1735 (108) | 1063 (66) | 1192 (74) | 1077 (67) |
+| 512 × 32 | 1199 (75) | 975 (61) | 1174 (73) | 1046 (65) |
+| 1024 × 16 | 1029 (64) | 965 (60) | 1150 (72) | 1034 (65) |
+| 8192 × 1 | 570 (71) | 540 (68) | 648 (81) | 584 (73) |
+| 128 × 16 | 220 (110) | 120 (60) | 161 (80) | 145 (72) |
+
+Throughput is unchanged within noise on every shape (M4: 128 × 128 2072 →
+2142 tok/s fp32; 8192 × 1 345 → 343; int8 1369 → 1306 / 314 → 314), CI
+runners in `verification.md`. Start-up: the int8 outer graph shrinks from
+2 692 to 1 396 nodes and the session opens in 0.31 s instead of 0.69 s on
+the M4 (fp32 0.32 s either way, `resources.md`). Rule of thumb since
+v0.6.1: **peak ≈ RSS after load + 0.06–0.07 MiB × padded tokens per batch**
+(fp32 and int8, every shape); a budget of `H` MiB allows `max_batch_tokens
+≈ H / 0.07`. The arena keeps the largest buffer set, so the peak is reached
+once and stays; concurrent runs (`serving/recipe.md`) each add their own.
+
+Measured and rejected on the way: an `If` that runs the v0.5.2 body without
+the slices for single-iteration inputs — both branches hold the tail's
+`MatMul`s and onnxruntime prepacks weights per kernel instance, subgraphs
+included, so RSS after load rose by 867 MiB (the 24 layers' projections)
+and the peak did not move; 1 024-row windows — same memory, −5 % tok/s.

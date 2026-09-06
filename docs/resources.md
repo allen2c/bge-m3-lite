@@ -51,6 +51,7 @@ are < 4 % of the CPU time; the rest is the backbone.
 | v0.4 (ORT defaults) | 0.39 s | 1283 MiB | 1554 MiB | | 2258 | 2.20 | 17 / 88 ms | 33 ms/s |
 | v0.5 default | 0.38 s | 1283 MiB | 1554 MiB | 2392 MiB | 2143 | 1.73 | 20 / 71 ms | 0 |
 | int8 v0.5 default | 0.75 s | 724 MiB | 935 MiB | 1679 MiB | 1582 | 2.32 | 11 / 29 ms | 0 |
+| int8 v0.6.1 (layer tail over rows, `memory.md`) | **0.31 s** | 730 MiB | 875 MiB | 1314 MiB | 1370 | | 12 / 29 ms | 0 |
 
 ## CPU-seconds per request under concurrency (v0.6, `serving/recipe.md`)
 

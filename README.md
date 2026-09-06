@@ -102,9 +102,11 @@ See `AGENTS.md` and `docs/` (architecture, tokenizer, verification, development)
 
 ## Status
 
-v0.6.0: fp32 with exact parity with FlagEmbedding (fused graph, attention in
-query chunks so an 8192-token text needs 2.5 GB), opt-in int8 backbone
-(row-wise + SmoothQuant, dense cosine 0.999 on every platform), retrieval
-helpers, token-budget batching, `low_memory` mode, no idle CPU, and an
-asyncio `AsyncEmbedder` for FastAPI. Shipped versions and open items with
-their numbers: `docs/roadmap/`.
+v0.6.1: fp32 with exact parity with FlagEmbedding (fused graph; attention in
+query chunks and the layer tail in 256-row windows, so an 8192-token text
+needs 1.8 GB and any batch 0.07 MiB per padded token), opt-in int8 backbone
+(row-wise + SmoothQuant, dense cosine 0.999 on every platform, 0.3 s
+start-up), retrieval helpers, token-budget batching, `low_memory` mode, no
+idle CPU, and an asyncio `AsyncEmbedder` for FastAPI with a length-aware
+micro-batcher. Shipped versions and closed decisions with their numbers:
+`docs/roadmap/`.

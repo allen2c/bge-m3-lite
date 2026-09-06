@@ -31,15 +31,17 @@ extra):
    The graph is opset 13 (per-axis `QuantizeLinear`); `Unsqueeze`/`ReduceSum`
    of the opset-11 export are converted.
 
-Ships as `model_int8.onnx` (graph, 0.7 MB) + `model_int8.onnx_data` (weights,
+Ships as `model_int8.onnx` (graph, 0.8 MB) + `model_int8.onnx_data` (weights,
 569 MiB; fp32: 2.27 GB) since v0.5: external data halves the resident memory
 (`../resources.md`). Deterministic on a given machine (the calibration
 statistics are fp32 activations, so other CPUs give a different digest, see
 `measurements.md`); `hub.INT8_FILES` pins the M4 build. The shipped fused
-graph carries the attention `Loop` (with the layer tail inside since v0.5.2),
+graph carries the attention `Loop` and the row `Loop` of the layer tail,
 which would hide the projections from calibration, so `quantize` rebuilds an
-unchunked fused graph from `model.onnx` in memory first (v0.5.2; the weight
-file is byte-identical to the v0.5.0 one, only the graph changed).
+unchunked fused graph from `model.onnx` in memory first (v0.5.2). The weight
+file is byte-identical to the v0.5.0 one; v0.6.1 changed the graph only
+(`--tail rows`, `../memory.md`: the session opens in 0.31 s instead of
+0.69 s on the M4, −10 % activation memory, bit-identical outputs).
 
 ```bash
 pip install "bge-m3-lite[quant]"       # onnx, onnx-ir, sympy (build time only)
@@ -89,7 +91,7 @@ bge-m3-lite quantize --method dynamic --raw --no-smooth           # v0.0.2 recip
 bge-m3-lite quantize --calibration my_texts.txt                   # own calibration set
 bge-m3-lite quantize --keep-fp32 'layer\.23/' --keep-fp32 'Attention_23$'  # last layer fp32
 bge-m3-lite quantize --attention-chunk 0                          # single MultiHeadAttention per layer
-bge-m3-lite quantize --layer-loop                                 # FFN inside the Loop too (fp32 layout; costs memory here)
+bge-m3-lite quantize --tail loop|none                             # layer tail inside the attention Loop (v0.5.2) or on the whole batch
 uv run tools/eval_model.py path/to/model.onnx                     # accuracy + speed report
 ```
 

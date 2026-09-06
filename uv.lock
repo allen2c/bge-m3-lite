@@ -208,7 +208,7 @@ wheels = [
 
 [[package]]
 name = "bge-m3-lite"
-version = "0.6.0"
+version = "0.6.1"
 source = { editable = "." }
 dependencies = [
     { name = "onnxruntime" },

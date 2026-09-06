@@ -20,7 +20,7 @@ from bge_m3_lite.embedder import BATCH_SIZE, MAX_BATCH_TOKENS, BGEM3Embedder
 
 # Measured on the M4 (docs/serving/recipe.md): fp32 short queries are GEMM-bound —
 # two runs in flight fill the thread gaps, and padding a burst into one call
-# is what scales (8 clients: 174 req/s versus 73); int8 runs 2 700 small ops
+# is what scales (8 clients: 174 req/s versus 73); int8 runs 1 400 small ops
 # per call and scales with runs in flight instead, batching loses there.
 DEFAULT_CONCURRENCY = {"fp32": 2, "int8": 4}
 DEFAULT_BATCH_WINDOW_MS = {"fp32": 10.0, "int8": 0.0}

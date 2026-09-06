@@ -78,14 +78,14 @@ ALL_FILES = TOKENIZER_FILES + HEAD_FILES + MODEL_FILES
 # its weights as external data (docs/resources.md). Hosted as GitHub release
 # assets; override the base URL with BGE_M3_LITE_INT8_URL or build the pair
 # locally into the cache.
-INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.5.2"
+INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.6.1"
 INT8_DATA_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.5.0"
 INT8_FILES: tuple[RemoteFile, ...] = (
     RemoteFile(
         "model_int8.onnx",
         f"{INT8_RELEASE}/model_int8.onnx",
-        741755,
-        "aabe2436389867e4814e43df2daad166ea2f71c47f14b734e674e1cefa9ad9c6",
+        814133,
+        "ec36cbe0757127209c26850f9294b2f336d0706a9d1aedd97be11e07ef8722e5",
     ),
     RemoteFile(
         "model_int8.onnx_data",
@@ -100,14 +100,14 @@ INT8_FILES: tuple[RemoteFile, ...] = (
 # weights in ``model.onnx_data`` by offset; only the merged QKV projections
 # live in ``model_fused.onnx_data``. Override the base URL with
 # BGE_M3_LITE_FUSED_URL.
-FUSED_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.5.2"
+FUSED_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.6.1"
 FUSED_DATA_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.3.0"
 FUSED_FILES: tuple[RemoteFile, ...] = (
-    RemoteFile(  # v0.4.0: attention in query chunks (docs/memory.md)
+    RemoteFile(  # v0.6.1: chunked attention, layer tail over rows (docs/memory.md)
         "model_fused.onnx",
         f"{FUSED_RELEASE}/model_fused.onnx",
-        200659,
-        "46590995e501c642eadecce9c8db0128fcf805a6b11e61af4db9007e064a18ab",
+        257993,
+        "430bd3a8fef1658d01eeb2af2cf3eb6f7b8256be9b019550b2ff92ebebab1a87",
     ),
     RemoteFile(  # unchanged since v0.2.0: the merged QKV weights
         "model_fused.onnx_data",

@@ -36,10 +36,10 @@ uv run tools/bench_serving.py --precision int8  # serving numbers, run alone
 | `fusion.md` | fused fp32 graph: what ships, how it is built |
 | `quantization/recipe.md`, `measurements.md` | int8 backbone: SmoothQuant + row-wise scheme; accuracy and speed per platform |
 | `calibration.md` | calibration texts (sources, licence), held-out evaluation set |
-| `memory.md` | attention `Loop` (chunk 256, layer tail inside); activation memory per padded token, `max_batch_tokens` |
+| `memory.md` | attention `Loop` (chunk 256) + layer tail in a row `Loop`; activation memory per padded token, `max_batch_tokens` |
 | `resources.md` | resident memory, CPU-seconds per token and per request, threads, idle CPU, `low_memory` |
 | `serving/recipe.md`, `measurements.md` | `AsyncEmbedder` for FastAPI: defaults, micro-batcher, workers × memory; req/s tables (M4, CI runners) |
 | `verification.md` | accuracy, platforms, throughput, start-up, memory |
 | `development.md` | fixtures, CI bench inputs, Python 3.13 check, release and asset upload |
 | `roadmap/done.md` | shipped versions and the facts behind them |
-| `roadmap/next.md` | v0.6.1 plan: `run_async`, token-aware batching, short-batch memory, int8 start-up |
+| `roadmap/next.md` | closed decisions (`run_async`, arena, `If` bypass) and later candidates |

@@ -126,3 +126,17 @@ busy or claimed and takes a burst as one call, so it costs nothing at low
 load: fp32 short queries 2.5× the sequential rate at 4 clients (p95 34 ms),
 3.6× at 8, at a third of the CPU per request; on by default for fp32, off for
 int8 (−6–24 %).
+
+## v0.6.1 — the leftovers, measured (done)
+
+Measured on the M4 and the CI matrix (2026-09-07, `../memory.md`,
+`../serving/measurements.md`); ships new `model_fused.onnx` and
+`model_int8.onnx` graphs (both weight files unchanged, outputs
+bit-identical).
+
+| item | result |
+|---|---|
+| `session.run_async` versus the thread pool | `bench_serving.py --only run_async`: loses everywhere (M4 fp32 ×1 41 vs 53 req/s, int8 ×4 125 vs 176; runners −25–50 %), closed |
+| length-aware micro-batcher | requests merge only within a character-length bucket (≤ 128 / 512 / 2048 chars): a query burst next to a 600-token passage answers in 37–75 ms instead of 1.5–4.4 s (fp32); int8 unchanged (no batching) |
+| short-batch activation memory | the layer tail runs in a scan-output `Loop` over 256 rows of the flattened batch (`fuse`/`quantize --tail rows`): fp32 `128 × 128` 1734 → 941 MiB, every shape −5–46 %, 0.06–0.07 MiB per padded token for any batch; tok/s unchanged; the `If` bypass was measured and rejected (double prepacking) |
+| int8 start-up | the same row loop halves the outer graph (2 692 → 1 396 nodes): session 0.69 → 0.31 s on the M4, int8 memory −10 % at every shape, no change to the quantisation recipe |
