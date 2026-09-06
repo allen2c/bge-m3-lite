@@ -72,8 +72,9 @@ echo "hello" | bge-m3-lite encode --sparse --colbert --tokens
 | `BGE_M3_LITE_CACHE` | cache directory (default `~/.cache/bge-m3-lite/BAAI--bge-m3`) |
 | `HF_ENDPOINT` | Hugging Face mirror, e.g. `https://hf-mirror.com` |
 | `BGE_M3_LITE_OFFLINE=1` | never download, fail if files are missing |
-| `BGE_M3_LITE_THREADS` | onnxruntime intra-op threads (default: physical cores) |
-| `BGE_M3_LITE_FUSED_URL`, `BGE_M3_LITE_INT8_URL` | mirror for the fused / int8 release assets |
+| `BGE_M3_LITE_THREADS` | onnxruntime intra-op threads (default: performance cores on Apple Silicon, physical cores elsewhere) |
+| `BGE_M3_LITE_SPIN=1` | let onnxruntime's threads spin between runs (default off: no idle CPU, see `docs/resources.md`) |
+| `BGE_M3_LITE_FUSED_URL`, `BGE_M3_LITE_INT8_URL` | base URL (mirror) for the fused / int8 release asset pairs |
 
 Model files are pinned to a specific Hugging Face revision and verified by
 SHA-256 after download.

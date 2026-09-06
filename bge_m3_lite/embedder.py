@@ -41,6 +41,7 @@ class BGEM3Embedder:
         model_path: str | Path | None = None,
         query_max_length: int = QUERY_MAX_LENGTH,
         passage_max_length: int | None = None,
+        spin: bool | None = None,
     ) -> None:
         """``precision="int8"`` uses the quantised backbone (see docs/quantization/);
         ``fused=False`` runs the raw Hub export instead of the fused fp32 graph
@@ -50,6 +51,12 @@ class BGEM3Embedder:
         ``query_max_length`` / ``passage_max_length`` are the defaults for
         :meth:`encode_queries`, :meth:`encode_corpus` and :meth:`compute_score`
         (passages default to ``max_length``; FlagEmbedding truncates both at 512).
+
+        ``num_threads`` defaults to the performance cores on Apple Silicon and
+        to onnxruntime's choice (physical cores) elsewhere; ``spin`` keeps the
+        worker threads spinning between runs (off by default, see
+        docs/resources.md). Both can also be set with ``BGE_M3_LITE_THREADS``
+        and ``BGE_M3_LITE_SPIN=1``.
         """
         files = hub.ensure_files(
             hub.TOKENIZER_FILES + hub.HEAD_FILES, cache_dir, quiet=quiet
@@ -57,9 +64,8 @@ class BGEM3Embedder:
         if model_path is not None:
             backbone_path = Path(model_path)
         elif precision == "int8":
-            backbone_path = hub.ensure_files((hub.INT8_FILE,), cache_dir, quiet=quiet)[
-                hub.INT8_FILE.name
-            ]
+            paths = hub.ensure_files(hub.INT8_FILES, cache_dir, quiet=quiet)
+            backbone_path = paths["model_int8.onnx"]
         elif precision == "fp32":
             paths = hub.ensure_files(hub.MODEL_FILES, cache_dir, quiet=quiet)
             if fused:  # the fused graph reads the Hub weights next to it by offset
@@ -70,7 +76,7 @@ class BGEM3Embedder:
         self.precision = precision
         self.fused = fused and precision == "fp32" and model_path is None
         self.tokenizer = XLMRobertaTokenizer.from_file(files["sentencepiece.bpe.model"])
-        self.backbone = OnnxBackbone(backbone_path, num_threads=num_threads)
+        self.backbone = OnnxBackbone(backbone_path, num_threads=num_threads, spin=spin)
         self.max_length = max_length
         self.query_max_length = query_max_length
         self.passage_max_length = (

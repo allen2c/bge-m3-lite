@@ -24,13 +24,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from bge_m3_lite.quantize import ATTENTION_CHUNK, _bump_opset, attention_nodes
+from bge_m3_lite.quantize import (
+    ATTENTION_CHUNK,
+    _bump_opset,
+    attention_nodes,
+    sha256,
+    write_external_data,
+)
 
 NUM_HEADS = 16
 HIDDEN_SIZE = 1024
 SHARED_DATA = "model.onnx_data"
-INLINE_LIMIT = 1024  # tensors up to this size stay inside the graph file
-ALIGN = 64
 
 
 @dataclass(frozen=True)
@@ -41,14 +45,6 @@ class FuseResult:
     data_sha256: str
     shared: int  # tensors served from model.onnx_data
     fused: int  # tensors written to model_fused.onnx_data
-
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _chunk_attention(model: Any, chunk: int) -> None:
@@ -95,7 +91,7 @@ def fuse(
     (or into ``out_dir``) and return sizes and digests. Deterministic."""
     try:
         import onnx
-        from onnx.external_data_helper import ExternalDataInfo, set_external_data
+        from onnx.external_data_helper import ExternalDataInfo
         from onnxruntime.transformers import optimizer
         from onnxruntime.transformers.fusion_options import FusionOptions
     except ImportError as exc:  # pragma: no cover - depends on the environment
@@ -111,7 +107,7 @@ def fuse(
 
     # Content -> (offset, length) of every tensor stored in the shared data file.
     original = onnx.load(str(model_in), load_external_data=False)
-    shared: dict[bytes, tuple[int, int]] = {}
+    shared: dict[bytes, tuple[str, int, int]] = {}
     with open(model_in.parent / SHARED_DATA, "rb") as fh:
         for tensor in original.graph.initializer:
             if tensor.data_location != onnx.TensorProto.EXTERNAL:
@@ -122,7 +118,7 @@ def fuse(
             offset, length = int(info.offset or 0), int(info.length or 0)
             fh.seek(offset)
             blob = fh.read(length)
-            shared[hashlib.sha1(blob).digest()] = (offset, length)
+            shared[hashlib.sha1(blob).digest()] = (SHARED_DATA, offset, length)
 
     options = FusionOptions("bert")
     fused = optimizer.optimize_model(
@@ -147,40 +143,15 @@ def fuse(
         _chunk_attention(model, attention_chunk)
     del model.metadata_props[:]
     entry = model.metadata_props.add()
-    entry.key, entry.value = "bge_m3_lite.source_sha256", _sha256(model_in)
+    entry.key, entry.value = "bge_m3_lite.source_sha256", sha256(model_in)
 
-    n_shared = n_fused = 0
-    with open(data_path, "wb") as out:
-        for tensor in sorted(model.graph.initializer, key=lambda t: t.name):
-            if tensor.data_location == onnx.TensorProto.EXTERNAL:
-                raise RuntimeError(f"{tensor.name}: unexpected external tensor")
-            blob = tensor.raw_data
-            if not blob:
-                continue  # typed fields (small constants), leave as they are
-            hit = shared.get(hashlib.sha1(blob).digest())
-            if hit is not None:
-                set_external_data(tensor, SHARED_DATA, offset=hit[0], length=hit[1])
-                n_shared += 1
-            elif len(blob) > INLINE_LIMIT:
-                pad = (-out.tell()) % ALIGN
-                out.write(b"\0" * pad)
-                set_external_data(
-                    tensor, data_path.name, offset=out.tell(), length=len(blob)
-                )
-                out.write(blob)
-                n_fused += 1
-            else:
-                continue
-            tensor.data_location = onnx.TensorProto.EXTERNAL
-            # ClearField, not ``= b""``: onnx.save_model re-writes every tensor
-            # that still *has* raw_data into its external location.
-            tensor.ClearField("raw_data")
+    n_shared, n_fused = write_external_data(model, data_path, shared=shared)
     onnx.save_model(model, str(graph_path))
     return FuseResult(
         graph_path.stat().st_size,
-        _sha256(graph_path),
+        sha256(graph_path),
         data_path.stat().st_size,
-        _sha256(data_path),
+        sha256(data_path),
         n_shared,
         n_fused,
     )

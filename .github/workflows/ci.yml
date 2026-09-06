@@ -70,7 +70,7 @@ jobs:
       - run: uv sync --group dev --group quant
       - run: uv run bge-m3-lite --quiet download
       - name: fetch the shipped int8 asset (may not exist yet before a release)
-        run: uv run python -c "from bge_m3_lite import hub; hub.ensure_files((hub.INT8_FILE,), quiet=True)" || echo "::warning::int8 asset not available"
+        run: uv run python -c "from bge_m3_lite import hub; hub.ensure_files(hub.INT8_FILES, quiet=True)" || echo "::warning::int8 asset not available"
       - name: cpu model
         id: cpu
         shell: bash

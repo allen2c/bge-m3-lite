@@ -25,7 +25,7 @@ Formulas follow `FlagEmbedding/inference/embedder/encoder_only/m3.py` and
 | `_proto.py` | minimal protobuf reader for `sentencepiece.bpe.model` |
 | `_torch_pickle.py` | torch-free loader for the two `.pt` heads (strict class allowlist) |
 | `hub.py` | pinned file table, SHA-256, resumable download, cross-process lock |
-| `model.py` | `OnnxBackbone`: ORT session, CPU provider, `ORT_ENABLE_ALL` |
+| `model.py` | `OnnxBackbone`: ORT session, CPU provider, `ORT_ENABLE_ALL`, no thread spinning, P-core thread default (`resources.md`) |
 | `fuse.py`, `quantize.py`, `calibration*.txt` | build-time only (`quant` extra): fused fp32 graph, SmoothQuant + int8 backbone, chunked attention (`memory.md`, `calibration.md`) |
 | `embedder.py` | `BGEM3Embedder`: batching (longest first, text + token budget), pooling, `compute_score` |
 | `cli.py` | `bge-m3-lite download / info / encode / fuse / quantize` |
@@ -36,7 +36,7 @@ Formulas follow `FlagEmbedding/inference/embedder/encoder_only/m3.py` and
 |---|---|---|
 | `onnx/model.onnx` + `model.onnx_data` + `Constant_7_attr__value` | 2.27 GB | official opset-11 export, outputs `token_embeddings`, `sentence_embedding` |
 | `model_fused.onnx` + `model_fused.onnx_data` (release assets) | 200 KB + 288 MB | fused graph with chunked attention (`fusion.md`, `memory.md`), shares `model.onnx_data` |
-| `model_int8.onnx` (release asset) | 569 MB | row-wise int8 backbone (`quantization/`) |
+| `model_int8.onnx` + `model_int8.onnx_data` (release assets) | 0.7 MB + 569 MB | row-wise int8 backbone (`quantization/`), weights as external data (`resources.md`) |
 | `sentencepiece.bpe.model` | 5 MB | 250 000 pieces, unigram, `nmt_nfkc` precompiled charsmap |
 | `sentencepiece.bpe.model.cache` | 4 MB | written locally on first load: parsed vocabulary keyed by the model's SHA-256 (no pickle) |
 | `colbert_linear.pt` | 2 MB | Linear(1024→1024), stored fp16 |

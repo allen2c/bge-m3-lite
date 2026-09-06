@@ -34,6 +34,7 @@ BGE_M3_LITE_RUN_SLOW=1 uv run pytest -m slow    # full model, 2.3 GB cache
 | `quantization/measurements.md` | int8 accuracy and speed per platform |
 | `calibration.md` | calibration texts (sources, licence), held-out evaluation set |
 | `memory.md` | attention in query chunks: long inputs without 4 GiB |
+| `resources.md` | resident memory, CPU-seconds per token, threads, idle CPU (v0.5) |
 | `verification.md` | accuracy, platforms, throughput, start-up, memory |
 | `development.md` | fixtures, CI bench inputs, release and asset upload |
 | `roadmap/done.md` | shipped versions and the facts behind them |

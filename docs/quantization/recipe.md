@@ -31,8 +31,10 @@ extra):
    The graph is opset 13 (per-axis `QuantizeLinear`); `Unsqueeze`/`ReduceSum`
    of the opset-11 export are converted.
 
-Single file `model_int8.onnx`, 569 MiB (fp32: 2.27 GB). Deterministic build;
-`hub.INT8_FILE` pins size and SHA-256.
+Ships as `model_int8.onnx` (graph, 0.7 MB) + `model_int8.onnx_data` (weights,
+569 MiB; fp32: 2.27 GB) since v0.5: external data halves the resident memory
+(`../resources.md`). Deterministic build; `hub.INT8_FILES` pins sizes and
+SHA-256 digests.
 
 ```bash
 pip install "bge-m3-lite[quant]"       # onnx, onnx-ir, sympy (build time only)
@@ -42,9 +44,9 @@ bge-m3-lite quantize --method dynamic   # ORT's per-tensor quantize_dynamic (v0.
 bge-m3-lite encode --int8 "text"
 ```
 
-Downloads come from the GitHub release asset in `hub.INT8_RELEASE`
-(override with `BGE_M3_LITE_INT8_URL`); a locally built file in the cache is
-used as-is when its size and digest match.
+Downloads come from the GitHub release assets in `hub.INT8_RELEASE`
+(`BGE_M3_LITE_INT8_URL` overrides the base URL); a locally built pair in the
+cache is used as-is when sizes and digests match.
 
 ## v0.4: fewer element-wise passes
 

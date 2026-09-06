@@ -74,15 +74,24 @@ HEAD_FILES: tuple[RemoteFile, ...] = (
 ALL_FILES = TOKENIZER_FILES + HEAD_FILES + MODEL_FILES
 
 # int8 backbone (SmoothQuant + row-wise dynamic int8 of the fused graph,
-# built by ``bge-m3-lite quantize``, see docs/quantization/). Hosted
-# as a GitHub release asset; override the URL with BGE_M3_LITE_INT8_URL or
-# build it locally into the cache.
-INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.4.0"
-INT8_FILE = RemoteFile(
-    "model_int8.onnx",
-    f"{INT8_RELEASE}/model_int8.onnx",
-    597159304,
-    "1d4814dcfda27ae96244067b17b7137c392e984a8aa09ba0471ca5964052c0c8",
+# built by ``bge-m3-lite quantize``, see docs/quantization/): the graph and
+# its weights as external data (docs/resources.md). Hosted as GitHub release
+# assets; override the base URL with BGE_M3_LITE_INT8_URL or build the pair
+# locally into the cache.
+INT8_RELEASE = "https://github.com/allen2c/bge-m3-lite/releases/download/v0.5.0"
+INT8_FILES: tuple[RemoteFile, ...] = (
+    RemoteFile(
+        "model_int8.onnx",
+        f"{INT8_RELEASE}/model_int8.onnx",
+        728012,
+        "387d42ddd3934a59963d0e36c1dc11e7391e97218d188469038225101d06f71d",
+    ),
+    RemoteFile(
+        "model_int8.onnx_data",
+        f"{INT8_RELEASE}/model_int8.onnx_data",
+        596474496,
+        "fc5e602311d45c6419eda09620ba9c5991efe311578b5e4f59f810c2d118bfd8",
+    ),
 )
 
 # Fused fp32 backbone (Attention / SkipLayerNorm / BiasGelu contrib ops, built by
@@ -123,11 +132,12 @@ def hf_endpoint() -> str:
 
 
 def file_url(remote: RemoteFile) -> str:
-    if remote is INT8_FILE and os.environ.get("BGE_M3_LITE_INT8_URL"):
-        return os.environ["BGE_M3_LITE_INT8_URL"]
-    if remote in FUSED_FILES and os.environ.get("BGE_M3_LITE_FUSED_URL"):
-        base = os.environ["BGE_M3_LITE_FUSED_URL"].rstrip("/")
-        return f"{base}/{remote.name}"
+    for files, var in (
+        (INT8_FILES, "BGE_M3_LITE_INT8_URL"),
+        (FUSED_FILES, "BGE_M3_LITE_FUSED_URL"),
+    ):
+        if remote in files and os.environ.get(var):
+            return f"{os.environ[var].rstrip('/')}/{remote.name}"
     if remote.remote_path.startswith(("https://", "http://")):
         return remote.remote_path
     return f"{hf_endpoint()}/{REPO_ID}/resolve/{REVISION}/{remote.remote_path}"

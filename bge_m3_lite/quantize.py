@@ -44,6 +44,20 @@ SMOOTH_TARGETS = (  # node-name patterns of the projections to smooth (fused gra
 )
 
 
+INLINE_LIMIT = 1024  # tensors up to this many bytes stay inside the graph file
+ALIGN = 64  # byte alignment of every tensor in the external data file
+
+
+@dataclass(frozen=True)
+class QuantResult:
+    """Sizes and SHA-256 digests of ``model_int8.onnx`` + ``model_int8.onnx_data``."""
+
+    graph_size: int
+    graph_sha256: str
+    data_size: int
+    data_sha256: str
+
+
 @dataclass(frozen=True)
 class QuantConfig:
     method: Literal["rowwise", "dynamic", "nbits"] = "rowwise"
@@ -76,13 +90,17 @@ def quantize(
     *,
     tokenizer_path: str | Path | None = None,
     calibration_texts: Sequence[str] | None = None,
-) -> tuple[int, str]:
-    """Write the quantised model and return ``(size_bytes, sha256)``.
+) -> QuantResult:
+    """Write the quantised model pair and return sizes and digests.
 
     ``model_in`` is normally the fused graph (``model_fused.onnx``); the raw
     Hub export works too but is not smoothed. ``tokenizer_path`` defaults to
     ``sentencepiece.bpe.model`` next to the model and is only needed for
     SmoothQuant calibration.
+
+    The weights go to ``<model_out>_data`` next to the graph (external data,
+    like the fused graph): onnxruntime then maps the file instead of keeping
+    a parsed protobuf copy of every tensor, see docs/resources.md.
     """
     config = config or QuantConfig()
     try:
@@ -129,17 +147,19 @@ def quantize(
             keep_fp32=config.keep_fp32,
             attention_chunk=config.attention_chunk,
         )
-        onnx.save_model(model, str(model_out))
     elif config.method == "dynamic":
+        tmp = model_out.with_name(model_out.name + ".tmp")
         quantize_dynamic(
             model,
-            str(model_out),
+            str(tmp),
             op_types_to_quantize=ops,
             per_channel=True,
             weight_type=QuantType.QInt8,
             use_external_data_format=False,
             extra_options={"DefaultTensorType": onnx.TensorProto.FLOAT},
         )
+        model = onnx.load(str(tmp))
+        tmp.unlink()
     else:
         from onnxruntime.quantization.matmul_nbits_quantizer import (
             MatMulNBitsQuantizer,
@@ -156,15 +176,70 @@ def quantize(
         )
         quantizer.process()
         # ``quantizer.model`` is an ONNXModel wrapper at runtime (typed as ModelProto).
-        result = getattr(quantizer.model, "model", quantizer.model)
-        if not isinstance(result, onnx.ModelProto):
-            raise TypeError(f"unexpected quantizer output {type(result)!r}")
-        onnx.save_model(result, str(model_out))
-    digest = hashlib.sha256()
-    with open(model_out, "rb") as fh:
+        model = getattr(quantizer.model, "model", quantizer.model)
+        if not isinstance(model, onnx.ModelProto):
+            raise TypeError(f"unexpected quantizer output {type(model)!r}")
+    data_path = model_out.with_name(model_out.name + "_data")
+    write_external_data(model, data_path)
+    onnx.save_model(model, str(model_out))
+    return QuantResult(
+        model_out.stat().st_size,
+        sha256(model_out),
+        data_path.stat().st_size,
+        sha256(data_path),
+    )
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(chunk)
-    return model_out.stat().st_size, digest.hexdigest()
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_external_data(
+    model: Any,
+    data_path: Path,
+    *,
+    shared: dict[bytes, tuple[str, int, int]] | None = None,
+) -> tuple[int, int]:
+    """Move the initializers of ``model`` out of the graph into ``data_path``.
+
+    Tensors whose SHA-1 is in ``shared`` are referenced at their existing
+    ``(location, offset, length)`` instead of being written; tensors up to
+    ``INLINE_LIMIT`` bytes stay inline. Deterministic (sorted by name, 64-byte
+    aligned). Returns ``(shared, written)`` counts; the caller saves the graph.
+    """
+    import onnx
+    from onnx.external_data_helper import set_external_data
+
+    n_shared = n_written = 0
+    with open(data_path, "wb") as out:
+        for tensor in sorted(model.graph.initializer, key=lambda t: t.name):
+            if tensor.data_location == onnx.TensorProto.EXTERNAL:
+                raise RuntimeError(f"{tensor.name}: unexpected external tensor")
+            blob = tensor.raw_data
+            if not blob:
+                continue  # typed fields (small constants), leave as they are
+            hit = shared.get(hashlib.sha1(blob).digest()) if shared else None
+            if hit is not None:
+                set_external_data(tensor, hit[0], offset=hit[1], length=hit[2])
+                n_shared += 1
+            elif len(blob) > INLINE_LIMIT:
+                out.write(b"\0" * ((-out.tell()) % ALIGN))
+                set_external_data(
+                    tensor, data_path.name, offset=out.tell(), length=len(blob)
+                )
+                out.write(blob)
+                n_written += 1
+            else:
+                continue
+            tensor.data_location = onnx.TensorProto.EXTERNAL
+            # ClearField, not ``= b""``: onnx.save_model re-writes every tensor
+            # that still *has* raw_data into its external location.
+            tensor.ClearField("raw_data")
+    return n_shared, n_written
 
 
 def smooth_targets(model: Any) -> list[Any]:

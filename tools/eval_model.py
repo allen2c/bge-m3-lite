@@ -1,9 +1,14 @@
 """Compare any backbone ONNX file against the FlagEmbedding fixtures and time it.
 
 Usage:  uv run tools/eval_model.py [MODEL.onnx ...]   (default: cached fp32 model)
+
+Besides accuracy and tok/s it reports what docs/resources.md tracks: resident
+memory after loading and at the peak, CPU-seconds per 1 000 tokens, and the
+CPU an idle session burns per second (thread spinning).
 """
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -14,6 +19,76 @@ from bge_m3_lite import hub
 from bge_m3_lite.embedder import BGEM3Embedder
 
 FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
+
+
+def rss_mib() -> float:
+    """Resident set size of this process in MiB."""
+    if sys.platform == "win32":
+        return _win_memory()[0]
+    if sys.platform == "darwin":
+        import subprocess
+
+        out = subprocess.check_output(["ps", "-o", "rss=", "-p", str(os.getpid())])
+        return int(out) / 1024
+    with open("/proc/self/statm") as fh:
+        return int(fh.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 2**20
+
+
+def peak_rss_mib() -> float:
+    if sys.platform == "win32":
+        return _win_memory()[1]
+    import resource
+
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak / 2**20 if sys.platform == "darwin" else peak / 1024
+
+
+def _win_memory() -> tuple[float, float]:  # pragma: no cover - Windows only
+    import ctypes
+    from ctypes import wintypes
+
+    class Counters(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    counters = Counters()
+    counters.cb = ctypes.sizeof(counters)
+    ctypes.windll.psapi.GetProcessMemoryInfo(  # type: ignore[attr-defined]
+        ctypes.windll.kernel32.GetCurrentProcess(),  # type: ignore[attr-defined]
+        ctypes.byref(counters),
+        counters.cb,
+    )
+    return counters.WorkingSetSize / 2**20, counters.PeakWorkingSetSize / 2**20
+
+
+def os_threads() -> int:
+    """Threads of this process (shows how many workers onnxruntime started)."""
+    if sys.platform == "linux":
+        with open("/proc/self/status") as fh:
+            return next(int(x.split()[1]) for x in fh if x.startswith("Threads:"))
+    if sys.platform == "darwin":
+        import subprocess
+
+        out = subprocess.check_output(["ps", "-M", "-p", str(os.getpid())])
+        return out.count(b"\n") - 1
+    return 0
+
+
+def idle_cpu_ms_per_s(seconds: float = 1.0) -> float:
+    """CPU time the process burns while nothing runs (onnxruntime spinning)."""
+    cpu0 = time.process_time()
+    time.sleep(seconds)
+    return (time.process_time() - cpu0) / seconds * 1000
 
 
 def _report_sparse_colbert(
@@ -63,9 +138,16 @@ def evaluate(model_path: Path, *, heldout: bool = True) -> None:
     npz = np.load(FIXTURES / "embeddings_ref.npz")
     t0 = time.perf_counter()
     emb = BGEM3Embedder(quiet=True, model_path=model_path)
+    assert emb.backbone.session is not None
+    size = model_path.stat().st_size
+    data = model_path.with_name(model_path.name + "_data")
+    if data.exists():
+        size += data.stat().st_size
     print(
-        f"\n== {model_path} ({model_path.stat().st_size / 2**20:.0f} MiB) "
-        f"session {time.perf_counter() - t0:.1f}s"
+        f"\n== {model_path} ({size / 2**20:.0f} MiB) "
+        f"session {time.perf_counter() - t0:.2f}s rss {rss_mib():.0f} MiB "
+        f"threads {emb.backbone.session.get_session_options().intra_op_num_threads} "
+        f"os-threads {os_threads()}"
     )
     out = emb.encode(
         ref["sentences"], batch_size=4, return_sparse=True, return_colbert_vecs=True
@@ -95,14 +177,36 @@ def evaluate(model_path: Path, *, heldout: bool = True) -> None:
         texts = [text] * bs
         ntok = sum(len(x) for x in emb.tokenize(texts))
         emb.encode(texts[:1])
-        t = time.perf_counter()
+        t, cpu = time.perf_counter(), time.process_time()
         emb.encode(texts, batch_size=bs)
-        dt = time.perf_counter() - t
-        print(f"{name:12s} {ntok / dt:6.0f} tok/s")
+        dt, dcpu = time.perf_counter() - t, time.process_time() - cpu
+        print(
+            f"{name:12s} {ntok / dt:6.0f} tok/s  {dcpu / ntok * 1000:5.2f} cpu-s/ktok"
+        )
+    # One short query at a time is the serving pattern: wall and CPU per call.
+    query = ["What is the capital of France?"] * 20
+    emb.encode(query[:1])
+    t, cpu = time.perf_counter(), time.process_time()
+    for q in query:
+        emb.encode(q)
+    n = len(query)
+    print(
+        f"short query   {(time.perf_counter() - t) / n * 1000:5.1f} ms wall "
+        f"{(time.process_time() - cpu) / n * 1000:5.1f} ms cpu"
+    )
+    print(
+        f"idle cpu {idle_cpu_ms_per_s(2.0):.0f} ms/s  rss {rss_mib():.0f} MiB  "
+        f"peak rss {peak_rss_mib():.0f} MiB"
+    )
     emb.close()
 
 
 if __name__ == "__main__":
     paths = [Path(p) for p in sys.argv[1:]] or [hub.default_cache_dir() / "model.onnx"]
-    for p in paths:
-        evaluate(p)
+    if len(paths) == 1:
+        evaluate(paths[0])
+    else:  # one process per model, so RSS and thread counts are not inherited
+        import subprocess
+
+        for p in paths:
+            subprocess.run([sys.executable, __file__, str(p)], check=True)

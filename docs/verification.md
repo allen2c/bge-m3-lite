@@ -81,6 +81,8 @@ runs in query chunks of 512 (`memory.md`): one 8192-token text peaks at
 2.5 GB RSS with either backbone (7.4–11.7 GB before). `encode(...,
 max_batch_tokens=16384)` (default) bounds the padded tokens per batch, so
 mixed inputs are safe; lower it for long documents on small machines.
+Resident memory per backbone, CPU-seconds per token and the idle cost of a
+session: `resources.md` (v0.5: int8 724 MiB after load, no idle CPU).
 
 ## Held-out set
 

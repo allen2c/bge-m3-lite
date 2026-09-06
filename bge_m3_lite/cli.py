@@ -26,7 +26,7 @@ def _cmd_info(args: argparse.Namespace) -> int:
     print(f"bge-m3-lite {__version__}")
     print(f"model: {hub.REPO_ID}@{hub.REVISION[:12]}")
     print(f"cache: {cache}")
-    for remote in (*hub.ALL_FILES, *hub.FUSED_FILES, hub.INT8_FILE):
+    for remote in (*hub.ALL_FILES, *hub.FUSED_FILES, *hub.INT8_FILES):
         path = hub.Path(cache) / remote.name
         state = "ok" if hub.is_complete(path, remote) else "missing"
         print(f"  {remote.name:26s} {remote.size / (1 << 20):9.1f} MiB  {state}")
@@ -40,7 +40,7 @@ def _cmd_quantize(args: argparse.Namespace) -> int:
     source = hub.FUSED_FILES if not args.raw else hub.MODEL_FILES
     files = hub.ensure_files(source, args.cache_dir, quiet=args.quiet)
     cache = hub.default_cache_dir() if args.cache_dir is None else Path(args.cache_dir)
-    out = args.output or cache / hub.INT8_FILE.name
+    out = args.output or cache / hub.INT8_FILES[0].name
     config = QuantConfig(
         method=args.method,
         bits=args.bits,
@@ -54,14 +54,18 @@ def _cmd_quantize(args: argparse.Namespace) -> int:
     )
     texts = load_calibration_texts(args.calibration) if args.calibration else None
     tokenizer = hub.ensure_files(hub.TOKENIZER_FILES, args.cache_dir, quiet=True)
-    size, digest = quantize(
+    result = quantize(
         files[source[0].name],
         out,
         config,
         tokenizer_path=tokenizer["sentencepiece.bpe.model"],
         calibration_texts=texts,
     )
-    print(f"{out}: {size} bytes sha256={digest}")
+    for path, size, digest in (
+        (out, result.graph_size, result.graph_sha256),
+        (out.with_name(out.name + "_data"), result.data_size, result.data_sha256),
+    ):
+        print(f"{path}: {size} bytes sha256={digest}")
     return 0
 
 

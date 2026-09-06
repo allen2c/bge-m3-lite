@@ -19,7 +19,7 @@ uv run tools/make_tokenizer_fixtures.py  # tests/fixtures/tokenizer_cases.json
 uv run tools/make_embedding_fixtures.py  # tests/fixtures/embeddings_ref.{json,npz}
 uv run tools/gen_grapheme_tables.py DIR  # DIR holds the Unicode 16 data files
 uv run tools/make_heldout.py             # tests/fixtures/heldout_* from the fp32 fused graph (no ref stack)
-uv run tools/eval_model.py MODEL.onnx    # accuracy on both sets + tok/s; CI bench turns this into a table
+uv run tools/eval_model.py MODEL.onnx    # accuracy, tok/s, CPU-s/1k tok, RSS, idle CPU; CI bench tabulates it
 ```
 
 `tests/fixtures/GraphemeBreakTest.txt` is the official Unicode test file.
@@ -46,15 +46,15 @@ docker run --rm --platform linux/arm64 -v $PWD:/src:ro python:3.12-slim sh -c \
 3. Tag and push; `release.yml` runs the checks, publishes to PyPI via trusted
    publishing (environment `pypi`) and creates the GitHub release:
    ```bash
-   git tag -a v0.4.0 -m v0.4.0 && git push origin v0.4.0
+   git tag -a v0.5.0 -m v0.5.0 && git push origin v0.5.0
    ```
 4. Upload the model assets the new `hub.py` points at (deterministic builds,
    compare the printed digests first). Run `gh` inside the repository: leaving
    it unloads the direnv-provided `GH_TOKEN`.
    ```bash
    bge-m3-lite fuse        # model_fused.onnx + model_fused.onnx_data (hub.FUSED_FILES)
-   bge-m3-lite quantize    # model_int8.onnx (hub.INT8_FILE)
-   gh release upload v0.4.0 -R allen2c/bge-m3-lite ~/.cache/bge-m3-lite/BAAI--bge-m3/model_fused.onnx ~/.cache/bge-m3-lite/BAAI--bge-m3/model_int8.onnx
+   bge-m3-lite quantize    # model_int8.onnx + model_int8.onnx_data (hub.INT8_FILES)
+   cd ~/.cache/bge-m3-lite/BAAI--bge-m3 && gh release upload v0.5.0 -R allen2c/bge-m3-lite model_int8.onnx model_int8.onnx_data
    ```
    Until the upload finishes, fresh installs of that version cannot download
    the asset. Unchanged assets stay on their old release (per-file URLs).

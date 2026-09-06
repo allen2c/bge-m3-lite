@@ -70,3 +70,15 @@ unchanged) and `model_int8.onnx` assets.
 | sparse int8 accuracy | measured, not fixed: the flips are fp32 near-ties (gap 0.001–0.009); last-layer-fp32 variants change ±1 text, so the recipe stays; `--keep-fp32` remains for experiments |
 | calibration provenance | 212 hand-written + 360 MIRACL passages, licence and recipe in `../calibration.md`; 40-text held-out set disjoint from calibration, reported by `tools/eval_model.py` |
 | engineering | `hub.py` retries 429/5xx/timeouts with back-off; the CI `bench` summary prints the CPU model and one accuracy + tok/s row per graph |
+
+## v0.5.0 — resource efficiency (done)
+
+Measured on the M4 and the CI matrix (2026-09-06, `../resources.md`); ships
+`model_int8.onnx` + `model_int8.onnx_data` (same tensors as v0.4).
+
+| goal | result |
+|---|---|
+| resident memory of the int8 session | graph + external data like the fused graph: 1838 → 724 MiB after load (ORT no longer keeps the parsed protobuf next to the prepacked weights), 8192-token peak 2286 → 1679 MiB, start-up 0.80 → 0.75 s, outputs identical |
+| idle CPU | `session.intra_op.allow_spinning=0` by default: 27–64 ms/s → 0 per session, short-query CPU −35 %, throughput −0–5 %; `BGE_M3_LITE_SPIN=1` / `spin=True` restore it |
+| CPU-seconds per token | thread default = performance cores on Apple Silicon (4 on the M4; ORT picked 5): −14 % CPU at equal throughput; one thread gives 2× the tokens per CPU-second of four — documented for multi-worker services |
+| measurement | `tools/eval_model.py` prints RSS after load / peak, CPU-s per 1k tokens, short-query wall + CPU, idle CPU and OS thread count; the CI bench summary tabulates them, one process per model |
