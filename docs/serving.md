@@ -129,5 +129,20 @@ small machines.
 - **fp32** when exact parity matters: the defaults (2 slots, batching)
   serve short queries at 2.6–3.6× the sequential rate under load; for a
   passage endpoint use a second wrapper with `batch_window_ms=0`.
-- CI runners (2–4 vCPU): see the `serving` section of the bench summary
-  (`ci.yml`, `workflow_dispatch`), one table per graph.
+
+## GitHub-hosted runners (CI `bench`, 2026-09-06, 9-token queries, req/s at p50 ms)
+
+| runner | graph | sequential | `to_thread` ×2 / ×4 | `encode(list)` 8 / 40 | `AsyncEmbedder` ×4, default |
+|---|---|---|---|---|---|
+| EPYC 9V74 (4 vCPU, 2 threads) | fp32 | 25 at 40 | 27 / 29 | 28 / 28 | 26 at 154 (batching ±0) |
+| | int8 | 35 at 29 | 42 / 50 | 51 / 57 | 51 at 80 |
+| Neoverse-N2 (4 cores) | fp32 | 18 at 55 | 17 / 19 | 32 / 35 | 28 at 141 (1.7× the ×4 threads) |
+| | int8 | 40 at 25 | 50 / 71 | 92 / 124 | 75 at 55 |
+| Apple M1 VM (3 vCPU) | fp32 | 11 at 95 | 15 / 15 | 20 / 21 | 16 at 261 (threads: 17) |
+| | int8 | 25 at 38 | 39 / 57 | 40 / 39 | 59 at 65 |
+
+Two-core x86 has no thread gaps to fill and nothing to gain from padding
+(GEMM saturates at one query), so every mode sits within ±15 % there; ARM
+gains 2× from batching on fp32 and, on int8, from either. Passages: 1.2–3
+req/s fp32, 3–6 int8, concurrency ±10 %, batching never wins. The summary
+of every `bench` run prints the full tables under "serving".

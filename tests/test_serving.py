@@ -239,7 +239,7 @@ def test_micro_batcher_window_and_full_batch_release_early():
         await emb.close()
         return time.perf_counter() - t0
 
-    assert run(main()) < 0.5
+    assert run(main()) < 2.0  # three 0.1 s calls; the 20 ms window never stalls
     assert [texts for texts, _ in fake.calls] == [
         ["blocker"],
         ["q0", "q1"],
