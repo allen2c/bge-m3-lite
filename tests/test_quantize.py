@@ -95,8 +95,18 @@ def _ops(model) -> set[str]:
     return ops
 
 
-@pytest.mark.parametrize(("zero_point", "chunk"), [(True, 4), (True, 0), (False, 4)])
-def test_rowwise_matmul_and_attention(zero_point, chunk):
+@pytest.mark.parametrize(
+    ("zero_point", "chunk", "kernel"),
+    [
+        (True, 4, {}),
+        (True, 0, {}),
+        (False, 4, {}),
+        (True, 4, {"matmul_integer": True}),
+        (False, 0, {"signed_weights": True}),
+        (True, 0, {"matmul_integer": True, "signed_weights": True}),
+    ],
+)
+def test_rowwise_matmul_and_attention(zero_point, chunk, kernel):
     onnx = pytest.importorskip("onnx")
     import numpy as np
     import onnxruntime as ort
@@ -156,9 +166,21 @@ def test_rowwise_matmul_and_attention(zero_point, chunk):
         quantize_embeddings=True,
         zero_point=zero_point,
         attention_chunk=chunk,
+        **kernel,
     )
     ops = _ops(model)
-    assert {"MatMulIntegerToFloat", "QuantizeLinear", "MultiHeadAttention"} <= ops
+    gemm = "MatMulInteger" if kernel.get("matmul_integer") else "MatMulIntegerToFloat"
+    assert {gemm, "QuantizeLinear", "MultiHeadAttention"} <= ops
+    w_type = (
+        onnx.TensorProto.INT8
+        if kernel.get("signed_weights")
+        else onnx.TensorProto.UINT8
+    )
+    assert all(
+        t.data_type == w_type
+        for t in model.graph.initializer
+        if t.name in ("w_qkv", "w_out")
+    )
     assert ("Loop" in ops) == (chunk > 0)  # seq 6 with chunk 4: two iterations
     assert "Attention" not in ops and "MatMul" not in ops
     assert all(
@@ -341,3 +363,189 @@ def test_fused_attention_chunking_is_exact(chunk):
     )
     valid = feeds["mask"].astype(bool)
     np.testing.assert_allclose(out[valid], ref[valid], rtol=1e-5, atol=1e-6)
+
+
+def _two_layer_model(rng, b, s, h, heads):
+    """Two fused-style encoder layers: Attention, output projection,
+    SkipLayerNormalization, FFN (MatMul, BiasGelu, MatMul), SkipLayerNormalization."""
+    import numpy as np
+    import onnx
+    from onnx import helper, numpy_helper
+
+    nodes, inits = [], []
+    x = "x"
+    for layer in range(2):
+        p = f"layer.{layer}"
+        w = {
+            f"{p}/w_qkv": (h, 3 * h),
+            f"{p}/w_out": (h, h),
+            f"{p}/w_in": (h, 4 * h),
+            f"{p}/w_ffn_out": (4 * h, h),
+        }
+        for name, shape in w.items():
+            inits.append(
+                numpy_helper.from_array(
+                    (rng.standard_normal(shape) * 0.2).astype(np.float32), name
+                )
+            )
+        for name, size in (
+            (f"{p}/b_qkv", 3 * h),
+            (f"{p}/b_out", h),
+            (f"{p}/b_in", 4 * h),
+            (f"{p}/b_ffn_out", h),
+            (f"{p}/beta1", h),
+            (f"{p}/beta2", h),
+        ):
+            inits.append(
+                numpy_helper.from_array(
+                    (rng.standard_normal(size) * 0.1).astype(np.float32), name
+                )
+            )
+        for name in (f"{p}/gamma1", f"{p}/gamma2"):
+            inits.append(numpy_helper.from_array(np.ones(h, dtype=np.float32), name))
+        mk = helper.make_node
+        ms = "com.microsoft"
+        nodes += [
+            mk(
+                "Attention",
+                [x, f"{p}/w_qkv", f"{p}/b_qkv", "mask"],
+                [f"{p}/a"],
+                name=f"Attention_{layer}",
+                domain=ms,
+                num_heads=heads,
+            ),
+            mk("MatMul", [f"{p}/a", f"{p}/w_out"], [f"{p}/o"], name=f"{p}/out/MatMul"),
+            mk(
+                "SkipLayerNormalization",
+                [f"{p}/o", x, f"{p}/gamma1", f"{p}/beta1", f"{p}/b_out"],
+                [f"{p}/ln1"],
+                name=f"SkipLayerNorm_{2 * layer}",
+                domain=ms,
+                epsilon=1e-5,
+            ),
+            mk("MatMul", [f"{p}/ln1", f"{p}/w_in"], [f"{p}/f"], name=f"{p}/in/MatMul"),
+            mk("BiasGelu", [f"{p}/f", f"{p}/b_in"], [f"{p}/g"], domain=ms),
+            mk(
+                "MatMul",
+                [f"{p}/g", f"{p}/w_ffn_out"],
+                [f"{p}/f2"],
+                name=f"{p}/ffn_out/MatMul",
+            ),
+            mk(
+                "SkipLayerNormalization",
+                [f"{p}/f2", f"{p}/ln1", f"{p}/gamma2", f"{p}/beta2", f"{p}/b_ffn_out"],
+                [f"{p}/y"],
+                name=f"SkipLayerNorm_{2 * layer + 1}",
+                domain=ms,
+                epsilon=1e-5,
+            ),
+        ]
+        x = f"{p}/y"
+    graph = helper.make_graph(
+        nodes,
+        "g",
+        [
+            helper.make_tensor_value_info("x", onnx.TensorProto.FLOAT, [b, s, h]),
+            helper.make_tensor_value_info("mask", onnx.TensorProto.INT32, [b, s]),
+        ],
+        [helper.make_tensor_value_info(x, onnx.TensorProto.FLOAT, [b, s, h])],
+        inits,
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 11)])
+    model.opset_import.add(domain="com.microsoft", version=1)
+    return model
+
+
+def _body_ops(model, loop_name: str) -> list[str]:
+    loop = next(n for n in model.graph.node if n.name == loop_name)
+    body = next(a.g for a in loop.attribute if a.name == "body")
+    return [n.op_type for n in body.node]
+
+
+@pytest.mark.parametrize("chunk", [3, 4, 64])
+def test_layer_tail_moves_into_loop_and_stays_exact(chunk):
+    """The whole per-token tail of a layer runs inside the attention ``Loop``
+    and the fp32 output is unchanged (seq 7 with chunk 3/4: 3/2 iterations)."""
+    onnx = pytest.importorskip("onnx")
+    import numpy as np
+    import onnxruntime as ort
+
+    from bge_m3_lite.fuse import _chunk_attention
+
+    rng = np.random.default_rng(5)
+    b, s, h, heads = 2, 7, 16, 2
+    model = _two_layer_model(rng, b, s, h, heads)
+    feeds = {
+        "x": rng.standard_normal((b, s, h)).astype(np.float32),
+        "mask": np.array([[1] * s, [1] * 5 + [0] * 2], dtype=np.int32),
+    }
+    ref = np.asarray(
+        ort.InferenceSession(model.SerializeToString()).run(None, feeds)[0]
+    )
+    _chunk_attention(model, chunk)
+    onnx.checker.check_model(model)
+    outer = [n.op_type for n in model.graph.node]
+    assert outer.count("MatMul") == 2 and outer.count("Loop") == 2  # QKV only
+    assert "SkipLayerNormalization" not in outer and "BiasGelu" not in outer
+    body = _body_ops(model, "Attention_1/loop")
+    assert body.count("MatMul") == 3 and body.count("SkipLayerNormalization") == 2
+    assert body.count("Slice") == 2 and body[-2:] == ["Concat", "Identity"]
+    assert model.graph.output[0].name == "layer.1/y"
+    out = np.asarray(
+        ort.InferenceSession(model.SerializeToString()).run(None, feeds)[0]
+    )
+    valid = feeds["mask"].astype(bool)
+    np.testing.assert_allclose(out[valid], ref[valid], rtol=1e-5, atol=1e-6)
+
+
+def test_layer_tail_pass_is_optional_and_skips_broken_chains():
+    onnx = pytest.importorskip("onnx")
+    import numpy as np
+
+    from bge_m3_lite.fuse import _chunk_attention
+    from bge_m3_lite.quantize import layer_tail_into_loop
+
+    rng = np.random.default_rng(6)
+    model = _two_layer_model(rng, 1, 5, 8, 2)
+    _chunk_attention(model, 4, layer_loop=False)
+    assert [n.op_type for n in model.graph.node].count("SkipLayerNormalization") == 4
+    # an FFN intermediate that is also a graph output breaks layer 0's chain
+    model.graph.output.append(
+        onnx.helper.make_tensor_value_info("layer.0/g", onnx.TensorProto.FLOAT, None)
+    )
+    assert layer_tail_into_loop(model) == 1
+    assert "BiasGelu" in [n.op_type for n in model.graph.node]
+    assert "BiasGelu" in _body_ops(model, "Attention_1/loop")
+
+
+def test_rowwise_layer_tail_in_loop():
+    """int8: the quantised projections of the tail move into the loop too."""
+    pytest.importorskip("onnx")
+    import numpy as np
+    import onnxruntime as ort
+
+    from bge_m3_lite.quantize import _quantize_rowwise
+
+    rng = np.random.default_rng(7)
+    b, s, h, heads = 2, 6, 16, 2
+    model = _two_layer_model(rng, b, s, h, heads)
+    feeds = {
+        "x": rng.standard_normal((b, s, h)).astype(np.float32),
+        "mask": np.array([[1] * s, [1] * 4 + [0] * 2], dtype=np.int32),
+    }
+    ref = np.asarray(
+        ort.InferenceSession(model.SerializeToString()).run(None, feeds)[0]
+    )
+    _quantize_rowwise(model, quantize_embeddings=False, attention_chunk=4)
+    outer = [n.op_type for n in model.graph.node]
+    assert "SkipLayerNormalization" not in outer
+    assert outer.count("MatMulIntegerToFloat") == 2  # the two QKV projections
+    body = _body_ops(model, "rowwise/Attention_0/loop")
+    assert body.count("MatMulIntegerToFloat") == 3
+    assert body.count("SkipLayerNormalization") == 2
+    out = np.asarray(
+        ort.InferenceSession(model.SerializeToString()).run(None, feeds)[0]
+    )
+    valid = feeds["mask"].astype(bool)
+    rel = np.abs(out - ref)[valid].max() / np.abs(ref)[valid].max()
+    assert rel < 0.05

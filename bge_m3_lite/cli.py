@@ -49,7 +49,10 @@ def _cmd_quantize(args: argparse.Namespace) -> int:
         quantize_embeddings=not args.keep_embeddings,
         smooth_alpha=None if args.no_smooth else args.alpha,
         symmetric=args.symmetric,
+        matmul_integer=args.matmul_integer,
+        signed_weights=args.signed_weights,
         attention_chunk=args.attention_chunk,
+        layer_loop=not args.no_layer_loop,
         keep_fp32=tuple(args.keep_fp32 or ()),
     )
     texts = load_calibration_texts(args.calibration) if args.calibration else None
@@ -74,7 +77,10 @@ def _cmd_fuse(args: argparse.Namespace) -> int:
 
     files = hub.ensure_files(hub.MODEL_FILES, args.cache_dir, quiet=args.quiet)
     result = fuse(
-        files["model.onnx"], args.output, attention_chunk=args.attention_chunk
+        files["model.onnx"],
+        args.output,
+        attention_chunk=args.attention_chunk,
+        layer_loop=not args.no_layer_loop,
     )
     out = args.output or files["model.onnx"].parent
     for name, size, digest in (
@@ -203,9 +209,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="query rows per attention pass (0 = whole sequence)",
     )
     q.add_argument(
+        "--no-layer-loop",
+        action="store_true",
+        help="keep the output projection and FFN outside the attention Loop",
+    )
+    q.add_argument(
         "--symmetric",
         action="store_true",
         help="rowwise only: symmetric per-row activations (faster, less exact)",
+    )
+    q.add_argument(
+        "--matmul-integer",
+        action="store_true",
+        help="rowwise only: MatMulInteger + Cast + Mul instead of MatMulIntegerToFloat",
+    )
+    q.add_argument(
+        "--signed-weights",
+        action="store_true",
+        help="rowwise only: int8 weights with zero point 0 (u8·s8 kernels; "
+        "inaccurate on AVX2, see docs/quantization/)",
     )
     q.add_argument(
         "--keep-fp32",
@@ -227,6 +249,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=ATTENTION_CHUNK,
         metavar="N",
         help="query rows per attention pass (0 = whole sequence, ORT Attention op)",
+    )
+    f.add_argument(
+        "--no-layer-loop",
+        action="store_true",
+        help="keep the output projection and FFN outside the attention Loop",
     )
     f.set_defaults(func=_cmd_fuse)
     return parser

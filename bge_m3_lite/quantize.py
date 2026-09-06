@@ -35,7 +35,7 @@ CALIBRATION_FILE = Path(__file__).with_name("calibration.txt")
 CALIBRATION_EXTRA = Path(__file__).with_name(
     "calibration_miracl.txt"
 )  # docs/calibration.md
-ATTENTION_CHUNK = 512  # see docs/memory.md
+ATTENTION_CHUNK = 256  # see docs/memory.md (512 before v0.5.2)
 SMOOTH_TARGETS = (  # node-name patterns of the projections to smooth (fused graph)
     r"^Attention_\d+(/MatMul)?$",  # merged QKV projection (chunked: its MatMul)
     r"attention/output/dense/MatMul$",
@@ -68,7 +68,10 @@ class QuantConfig:
     smooth_alpha: float | None = 0.5  # SmoothQuant strength, None = off
     calibration_max_length: int = 512
     symmetric: bool = False  # rowwise: fixed zero point 128 instead of per-row
+    matmul_integer: bool = False  # rowwise: MatMulInteger + Cast + Mul (v3 kernel path)
+    signed_weights: bool = False  # rowwise: int8 weights, zero point 0 (u8·s8 kernels)
     attention_chunk: int = ATTENTION_CHUNK  # query rows per attention pass, 0 = off
+    layer_loop: bool = True  # whole layer tail inside the attention Loop (v0.5.2)
     # node-name regexes whose MatMul / Attention stay fp32 (experiments)
     keep_fp32: tuple[str, ...] = ()
 
@@ -146,6 +149,9 @@ def quantize(
             zero_point=not config.symmetric,
             keep_fp32=config.keep_fp32,
             attention_chunk=config.attention_chunk,
+            layer_loop=config.layer_loop,
+            matmul_integer=config.matmul_integer,
+            signed_weights=config.signed_weights,
         )
     elif config.method == "dynamic":
         tmp = model_out.with_name(model_out.name + ".tmp")
@@ -496,6 +502,104 @@ def attention_nodes(
     return nodes, inits
 
 
+def layer_tail_into_loop(model: Any) -> int:
+    """Move the per-token tail of every layer into its attention ``Loop``.
+
+    After :func:`attention_nodes` a layer reads ``Loop -> output projection ->
+    SkipLayerNormalization -> FFN in -> BiasGelu -> FFN out ->
+    SkipLayerNormalization``; every op after the ``Loop`` is per token, so the
+    same chain on ``chunk`` rows inside the body is exact and its intermediates
+    (the FFN's ``rows x 4096`` above all) shrink from the padded batch to one
+    chunk (docs/memory.md). The residual input of the first
+    SkipLayerNormalization (the layer input) is sliced like the query rows;
+    the nodes are otherwise moved verbatim. Returns the number of loops
+    rewritten; a graph without the expected chain (int8 ``keep_fp32``
+    ``Attention`` layers, ``--attention-chunk 0``) is left alone.
+    """
+    from onnx import helper
+
+    graph = model.graph
+    nodes = list(graph.node)
+    consts = {t.name for t in graph.initializer}
+    moved: set[int] = set()
+    rewritten = 0
+    for li, loop in enumerate(nodes):
+        if loop.op_type != "Loop" or not loop.name.endswith("/loop"):
+            continue
+        p = loop.name[: -len("/loop")]
+        out = loop.output[0]
+        tail, avail, residual, lns = [], {out}, None, 0
+        for j in range(li + 1, len(nodes)):
+            node = nodes[j]
+            for name in node.input:
+                if not name or name in consts or name in avail:
+                    continue
+                if residual in (None, name):
+                    residual = name
+                else:  # not a per-token chain rooted at this loop
+                    residual = None
+                    tail = []
+                    break
+            else:
+                tail.append(j)
+                avail.update(node.output)
+                if node.op_type == "SkipLayerNormalization":
+                    lns += 1
+                    if lns == 2:
+                        break
+                continue
+            break
+        first_ln = next(
+            (nodes[j] for j in tail if nodes[j].op_type == "SkipLayerNormalization"),
+            None,
+        )
+        if lns != 2 or first_ln is None or residual != first_ln.input[1]:
+            continue
+        residual = str(residual)
+        final = nodes[tail[-1]].output[0]
+        inner = avail - {final}
+        used_outside = {o.name for o in graph.output}
+        for k, n in enumerate(nodes):
+            if k not in tail:
+                used_outside.update(n.input)
+        if used_outside & inner:
+            continue  # an intermediate is used elsewhere (extra graph outputs)
+        body = next(a.g for a in loop.attribute if a.name == "body")
+        body_nodes = [n for n in body.node if n.op_type not in ("Concat", "Identity")]
+        rename = {out: f"{p}/oc", residual: f"{p}/xc", final: f"{p}/layer_out"}
+        body_nodes.append(
+            helper.make_node(
+                "Slice",
+                [residual, f"{p}/start", f"{p}/end", f"{p}/1"],
+                [f"{p}/xc"],
+            )
+        )
+        for j in tail:
+            node = type(nodes[j])()
+            node.CopyFrom(nodes[j])
+            for k, name in enumerate(node.input):
+                node.input[k] = rename.get(name, name)
+            for k, name in enumerate(node.output):
+                node.output[k] = rename.get(name, name)
+            body_nodes.append(node)
+        body_nodes += [
+            helper.make_node(
+                "Concat", [f"{p}/acc", f"{p}/layer_out"], [f"{p}/acc_next"], axis=1
+            ),
+            helper.make_node("Identity", [f"{p}/cond"], [f"{p}/cond_next"]),
+        ]
+        del body.node[:]
+        body.node.extend(body_nodes)
+        loop.output[0] = final
+        moved.update(tail)
+        rewritten += 1
+    if moved:
+        del graph.node[:]
+        graph.node.extend(n for k, n in enumerate(nodes) if k not in moved)
+        del graph.value_info[:]
+    return rewritten
+
+
 def _quantize_rowwise(
     model: Any,
     *,
@@ -503,6 +607,9 @@ def _quantize_rowwise(
     zero_point: bool = True,
     keep_fp32: tuple[str, ...] = (),
     attention_chunk: int = ATTENTION_CHUNK,
+    layer_loop: bool = True,
+    matmul_integer: bool = False,
+    signed_weights: bool = False,
 ) -> None:
     import onnx
     from onnx import helper, numpy_helper
@@ -540,13 +647,17 @@ def _quantize_rowwise(
         k, n = w.shape
         w_scale = np.maximum(np.abs(w).max(axis=0) / _QI8_MAX, 1e-12)
         w_q = np.clip(np.round(w / w_scale), -_QI8_MAX, _QI8_MAX).astype(np.int8)
-        inits[w_name].CopyFrom(
-            numpy_helper.from_array(
-                (w_q.astype(np.int16) + 128).astype(np.uint8), w_name
+        if signed_weights:  # u8·s8: saturates MLAS's AVX2 kernel, fine on VNNI/ARM
+            inits[w_name].CopyFrom(numpy_helper.from_array(w_q, w_name))
+            b_zp = const(f"{prefix}/b_zp", np.zeros((n,), dtype=np.int8))
+        else:
+            inits[w_name].CopyFrom(
+                numpy_helper.from_array(
+                    (w_q.astype(np.int16) + 128).astype(np.uint8), w_name
+                )
             )
-        )
+            b_zp = const(f"{prefix}/b_zp", np.full((n,), 128, dtype=np.uint8))
         ws = const(f"{prefix}/w_scale", w_scale.astype(np.float32))
-        b_zp = const(f"{prefix}/b_zp", np.full((n,), 128, dtype=np.uint8))
         shp = const(f"{prefix}/shape2d", np.array([-1, k], dtype=np.int64))
         n_const = const(f"{prefix}/n", np.array([n], dtype=np.int64))
         p = prefix
@@ -557,6 +668,16 @@ def _quantize_rowwise(
             mk("ReduceMin", [f"{p}/x2d"], [f"{p}/mn0"], axes=[1], keepdims=1),
         ]
         mm = [f"{p}/xq", w_name, c_one, ws, c_a_zp, b_zp]
+
+        def gemm(out: str) -> list[Any]:
+            if not matmul_integer:
+                return [mk("MatMulIntegerToFloat", mm, [out], domain="com.microsoft")]
+            return [  # the v3 path: int32 GEMM, then the weight scale in fp32
+                mk("MatMulInteger", [f"{p}/xq", w_name, c_a_zp, b_zp], [f"{p}/yi"]),
+                mk("Cast", [f"{p}/yi"], [f"{p}/yf"], to=onnx.TensorProto.FLOAT),
+                mk("Mul", [f"{p}/yf", ws], [out]),
+            ]
+
         if zero_point:
             colsum = const(
                 f"{p}/colsum",
@@ -582,7 +703,7 @@ def _quantize_rowwise(
                     [f"{p}/xq"],
                     axis=0,
                 ),
-                mk("MatMulIntegerToFloat", mm, [f"{p}/y0"], domain="com.microsoft"),
+                *gemm(f"{p}/y0"),
                 mk("Mul", [f"{p}/zp", colsum], [f"{p}/corr"]),
                 mk("Sub", [f"{p}/y0", f"{p}/corr"], [f"{p}/yc"]),
                 mk("Mul", [f"{p}/yc", f"{p}/scale"], [f"{p}/y2d"]),
@@ -602,7 +723,7 @@ def _quantize_rowwise(
                     [f"{p}/xq"],
                     axis=0,
                 ),
-                mk("MatMulIntegerToFloat", mm, [f"{p}/y0"], domain="com.microsoft"),
+                *gemm(f"{p}/y0"),
                 mk("Mul", [f"{p}/y0", f"{p}/scale"], [f"{p}/y2d"]),
             ]
         nodes += [
@@ -675,3 +796,5 @@ def _quantize_rowwise(
     graph.initializer.extend(consts)
     # value_info entries of the raw export may now carry stale types
     del graph.value_info[:]
+    if attention_chunk > 0 and layer_loop:
+        layer_tail_into_loop(model)

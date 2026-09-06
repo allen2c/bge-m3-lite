@@ -28,6 +28,7 @@ from bge_m3_lite.quantize import (
     ATTENTION_CHUNK,
     _bump_opset,
     attention_nodes,
+    layer_tail_into_loop,
     sha256,
     write_external_data,
 )
@@ -47,8 +48,9 @@ class FuseResult:
     fused: int  # tensors written to model_fused.onnx_data
 
 
-def _chunk_attention(model: Any, chunk: int) -> None:
-    """``Attention`` -> ``MatMul`` + ``Split`` + chunked ``MultiHeadAttention``."""
+def _chunk_attention(model: Any, chunk: int, *, layer_loop: bool = True) -> None:
+    """``Attention`` -> ``MatMul`` + ``Split`` + chunked ``MultiHeadAttention``,
+    then (``layer_loop``) the rest of the layer into the same ``Loop``."""
     from onnx import helper
 
     _bump_opset(model, 13)
@@ -79,6 +81,8 @@ def _chunk_attention(model: Any, chunk: int) -> None:
     del model.graph.node[:]
     model.graph.node.extend(new_nodes)
     model.graph.initializer.extend(inits)
+    if layer_loop:
+        layer_tail_into_loop(model)
 
 
 def fuse(
@@ -86,6 +90,7 @@ def fuse(
     out_dir: str | Path | None = None,
     *,
     attention_chunk: int = ATTENTION_CHUNK,
+    layer_loop: bool = True,
 ) -> FuseResult:
     """Write ``model_fused.onnx`` + ``model_fused.onnx_data`` next to ``model_in``
     (or into ``out_dir``) and return sizes and digests. Deterministic."""
@@ -140,7 +145,7 @@ def fuse(
     if not any(o.domain == "com.microsoft" for o in model.opset_import):
         model.opset_import.add(domain="com.microsoft", version=1)
     if attention_chunk > 0:
-        _chunk_attention(model, attention_chunk)
+        _chunk_attention(model, attention_chunk, layer_loop=layer_loop)
     del model.metadata_props[:]
     entry = model.metadata_props.add()
     entry.key, entry.value = "bge_m3_lite.source_sha256", sha256(model_in)
