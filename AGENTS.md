@@ -21,6 +21,7 @@ uv sync --group dev --group quant
 uv run ruff format . && uv run ruff check . && uv run pyright
 uv run pyproject-fmt --check pyproject.toml && uv run pytest
 BGE_M3_LITE_RUN_SLOW=1 uv run pytest -m slow    # full model, 2.3 GB cache
+uv run tools/bench_serving.py --precision int8  # serving numbers, run alone (docs/serving.md)
 ```
 
 ## Docs (`docs/`)
@@ -35,8 +36,8 @@ BGE_M3_LITE_RUN_SLOW=1 uv run pytest -m slow    # full model, 2.3 GB cache
 | `calibration.md` | calibration texts (sources, licence), held-out evaluation set |
 | `memory.md` | attention `Loop` (chunk 256, layer tail inside since v0.5.2); activation memory per padded token, `max_batch_tokens` budget |
 | `resources.md` | resident memory, CPU-seconds per token, threads, idle CPU, `low_memory` (v0.5) |
+| `serving.md` | `AsyncEmbedder` for FastAPI: concurrency, micro-batching, workers × memory, measured req/s (v0.6) |
 | `verification.md` | accuracy, platforms, throughput, start-up, memory |
 | `development.md` | fixtures, CI bench inputs, release and asset upload |
 | `roadmap/done.md` | shipped versions and the facts behind them |
-| `roadmap/next.md` | open items: v0.6 asyncio serving (numbers), short-batch memory, int8 node count |
-| `roadmap/async.md` | the v0.6 plan: `AsyncEmbedder`, micro-batching, FastAPI recipe, bench, acceptance criteria |
+| `roadmap/next.md` | open items: short-batch memory, int8 node count, serving follow-ups |

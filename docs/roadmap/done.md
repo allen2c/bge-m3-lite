@@ -107,3 +107,22 @@ memory pattern never applies to the first run of a shape; the BFC arena grows
 in powers of two, and the peak follows the allocation sequence, so every
 layout change must be measured (`kSameAsRequested`, shrinkage, chunk 512 +
 loop all lost).
+
+## v0.6.0 — asyncio serving (done)
+
+`AsyncEmbedder` (`../serving.md`, measured with `tools/bench_serving.py` on
+the M4 and the CI matrix, 2026-09-06; no model asset changes): `await
+encode / encode_queries / encode_corpus` with the synchronous signatures and
+outputs, run in a private thread pool with at most `max_concurrency` calls in
+flight (default 2 for fp32, 4 for int8), `queue_depth` / `in_flight` for
+health endpoints, `async with` / `close()` that drains the queue. Facts: one
+4-thread session beats four 1-thread sessions; fp32 short queries are
+GEMM-bound (two runs in flight +50 % at equal CPU, then flat; padding 8 into
+one call 3.6×), int8 scales with runs in flight (2.1× at 4, 2.4× at 8) and
+loses with batching; passages gain 25–40 % from 2–4 runs in flight; each run
+in flight adds its own activations (0.07 MiB per padded token). The
+micro-batcher (`batch_window_ms`) holds a request only while every slot is
+busy or claimed and takes a burst as one call, so it costs nothing at low
+load: fp32 short queries 2.5× the sequential rate at 4 clients (p95 34 ms),
+3.6× at 8, at a third of the CPU per request; on by default for fp32, off for
+int8 (−6–24 %).

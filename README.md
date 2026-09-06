@@ -50,6 +50,17 @@ embedder.compute_score([("What is BGE M3?", "BGE M3 is ...")])
 # {'colbert': [...], 'sparse': [...], 'dense': [...], 'sparse+dense': [...], 'colbert+sparse+dense': [...]}
 ```
 
+```python
+from bge_m3_lite import AsyncEmbedder  # asyncio / FastAPI: never blocks the event loop
+
+async with AsyncEmbedder(
+    precision="int8"
+) as emb:  # bounded in-flight calls, optional micro-batching
+    out = await emb.encode_queries(
+        "What is BGE M3?"
+    )  # same signatures and outputs as above
+```
+
 Passing a single string returns unwrapped values, like FlagEmbedding.
 Batches are bounded by `batch_size` texts **and** `max_batch_tokens` padded
 tokens (default 16384), so mixing short and 8192-token inputs stays within
@@ -59,7 +70,8 @@ memory.
 `BGEM3Embedder(low_memory=True)` starts in 0.1–0.6 s with ~140 MiB of private
 memory (weights stay in the mapped file, shared between processes) at twice
 the latency of a single short query: for serverless and one-shot use
-(`docs/resources.md`).
+(`docs/resources.md`). Serving: `docs/serving.md` (FastAPI recipe, workers ×
+memory, measured throughput per concurrency).
 
 ### CLI
 
@@ -90,10 +102,9 @@ See `AGENTS.md` and `docs/` (architecture, tokenizer, verification, development)
 
 ## Status
 
-v0.3.1: fp32 with exact parity with FlagEmbedding (fused graph by default),
-opt-in int8 backbone (row-wise + SmoothQuant, dense cosine 0.999 on every
-platform), retrieval helpers, token-budget batching, Windows. Next (v0.4,
-built and measured, awaiting the CI matrix): attention in query chunks so an
-8192-token text needs 2.5 GB instead of 7 GB, a faster int8 graph, a
-documented calibration corpus and a held-out evaluation set. Plan and
-numbers: `docs/roadmap/`.
+v0.6.0: fp32 with exact parity with FlagEmbedding (fused graph, attention in
+query chunks so an 8192-token text needs 2.5 GB), opt-in int8 backbone
+(row-wise + SmoothQuant, dense cosine 0.999 on every platform), retrieval
+helpers, token-budget batching, `low_memory` mode, no idle CPU, and an
+asyncio `AsyncEmbedder` for FastAPI. Shipped versions and open items with
+their numbers: `docs/roadmap/`.

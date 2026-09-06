@@ -52,6 +52,16 @@ are < 4 % of the CPU time; the rest is the backbone.
 | v0.5 default | 0.38 s | 1283 MiB | 1554 MiB | 2392 MiB | 2143 | 1.73 | 20 / 71 ms | 0 |
 | int8 v0.5 default | 0.75 s | 724 MiB | 935 MiB | 1679 MiB | 1582 | 2.32 | 11 / 29 ms | 0 |
 
+## CPU-seconds per request under concurrency (v0.6, `serving.md`)
+
+Runs in flight on one 4-thread session, 9-token queries (`tools/bench_serving.py`,
+M4): fp32 72 ms CPU per request alone, 63–68 with two in flight (the second
+run fills the thread gaps: +45 % throughput for free), 96 at four, 132 at
+eight; int8 29 → 28 → 36 → 43. Padding queries into one `encode` call is
+the cheap path for fp32 (20 ms CPU per request at 8 per call, 15 at 40);
+int8 gains nothing there (18). 158-token passages: fp32 280 → 288 (×2) →
+391 (×4) → 521 (×8) ms; int8 325 → 358 → 438 → 526.
+
 ## `low_memory=True` (v0.5.1): weights stay in the mapped file
 
 `BGEM3Embedder(low_memory=True)` / `encode --low-memory` sets
