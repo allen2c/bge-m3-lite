@@ -42,6 +42,7 @@ uv run tools/bench_serving.py --precision int8  # serving numbers, run alone
 | `memory.md` | attention `Loop` (chunk 256) + layer tail in a row `Loop` (`--tail`, `--tail-rows`); activation memory per padded token, `max_batch_tokens` |
 | `resources.md` | resident memory, CPU-seconds per token and per request, threads, idle CPU, `low_memory`, start-up |
 | `serving/recipe.md`, `measurements.md` | `AsyncEmbedder` for FastAPI: defaults, micro-batcher and its length buckets, workers × memory; req/s tables (M4, CI runners), `run_async` verdict |
+| `serving/fastapi.md` | the production FastAPI shape: two wrappers, queue guard before timeout, shutdown by the lifespan |
 | `serving/asyncio.md` | the asyncio scheduling facts `serving.py` relies on: 3.11 versus 3.12+ behaviour, CPython change, the test that pins each; `tools/asyncio_probe.py` output |
 | `verification.md` | accuracy, platforms, throughput, start-up, memory |
 | `development.md` | fixtures, CI bench inputs, Python 3.13 check, release and asset upload |

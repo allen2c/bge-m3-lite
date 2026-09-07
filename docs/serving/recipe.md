@@ -12,11 +12,6 @@ ticking every 10 ms is delayed by 1–4 ms while requests run (20 ms with 4+
 ## FastAPI recipe
 
 ```python
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from bge_m3_lite import AsyncEmbedder
-
-
 @asynccontextmanager
 async def lifespan(app):
     async with AsyncEmbedder(precision="int8") as emb:  # one model copy per process
@@ -24,20 +19,14 @@ async def lifespan(app):
         yield
 
 
-app = FastAPI(lifespan=lifespan)
-
-
 @app.post("/embed")
 async def embed(texts: list[str]):
     out = await app.state.emb.encode_queries(texts, return_sparse=True)
     return {"dense": out["dense_vecs"].tolist(), "sparse": out["lexical_weights"]}
-
-
-@app.get("/health")
-async def health():
-    emb = app.state.emb
-    return {"in_flight": emb.in_flight, "queue_depth": emb.queue_depth}
 ```
+
+The production shape (two wrappers, queue-depth guard, timeouts, health,
+shutdown) is in `fastapi.md`.
 
 Rules: never call the synchronous `encode` inside a coroutine (a short query
 blocks the loop for 11–20 ms, a long passage for seconds); no other CPU work
