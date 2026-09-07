@@ -65,6 +65,16 @@ sharing the four threads, as with any two runs in flight.
 | ×8, batching off / on | 76 / 174 | 105 / 109 → 46 / 47 | 63 / 20 | 181 / 171 | 43 / 48 → 47 / 48 | 37 / 18 |
 | 158-token passages ×4, off / on | 16.5 / 13.3 | 240 / 250 → 295 / 320 | 289 / 273 | 15.0 / 9.4 | 263 / 274 → 419 / 455 | 455 / 371 |
 
+## v0.6.2 (`asyncio.shield` in `_run`, M4, 2026-09-07)
+
+A/B of v0.6.1 and v0.6.2 `serving.py` in the same process image, run back
+to back (`--only "AsyncEmbedder|burst"`, fp32 req/s at p50 / p95 ms):
+×4 window 118.8 at 34 / 34 → 122.5 at 33 / 33, ×8 window 169.9 at 47 / 47 →
+170.2 at 47 / 47, burst ×8 167.3 at 48 / 48 → 168.6 at 47 / 48, passages ×4
+16.0 → 16.4; int8 ×4 155 → 166, ×8 window 149 → 170, burst ×8 170 → 144 (the
+int8 pair ran while a system indexer held two cores: loop lag up to 27 ms
+on both sides). The extra loop iteration per request is not measurable.
+
 ## GitHub-hosted runners (CI `bench`, 2026-09-06, 9-token queries, req/s at p50 ms)
 
 | runner | graph | sequential | `to_thread` ×2 / ×4 | `encode(list)` 8 / 40 | `AsyncEmbedder` ×4, default |

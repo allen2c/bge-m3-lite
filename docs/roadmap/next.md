@@ -4,24 +4,14 @@ Shipped versions and the facts behind them: `done.md`. Every item is
 measured before it is merged (CI `bench` matrix, `tools/bench_serving.py`
 and the memory shapes run alone on the M4) and lands only if the numbers say
 so. v0.6.1 closed the four open items (`run_async`, length-aware batching,
-short-batch memory, int8 start-up).
+short-batch memory, int8 start-up); v0.6.2 the asyncio 3.11 / 3.12+ audit.
 
-## v0.6.2 — asyncio on Python 3.11 versus 3.13, fully understood
+## Nothing scheduled
 
-`AsyncEmbedder` relies on scheduling details that changed between 3.11 and
-3.13: `await gather(*done)` no longer yields to the loop (the v0.6 `close()`
-busy-loop, fixed by waiting only on unfinished futures), `call_soon` /
-`call_later` ordering within one iteration, `Semaphore` fairness and
-`Future` callbacks. Goal: a written, tested account of every difference the
-serving layer touches, so that no code path depends on version-specific
-behaviour by accident.
-
-| step | done when |
-|---|---|
-| enumerate the assumptions in `serving.py` (`_enqueue`, `_flush`, `_run`, `close`) and the tests that pin them | a table in `docs/serving/asyncio.md` (≤ 100 lines): assumption → 3.11 behaviour → 3.13 behaviour → CPython change (issue / commit) |
-| reproduce each difference with a minimal script on both interpreters | scripts under `tools/asyncio_probe.py`, output recorded in the doc |
-| tests that fail on the wrong assumption under both versions (`pytest-timeout` guards a hang) | 3.11 and 3.13 green locally and in CI; the 3.13 CI job stays under 2 minutes |
-| decide whether `serving.py` needs version branches or a single robust form | code change only if a test demands it; outputs stay bit-exact with the synchronous API |
+v0.6.2 closed the asyncio question (`done.md`, `../serving/asyncio.md`): the
+serving layer has one robust form for 3.11 and 3.12+, every scheduling fact
+it relies on has a probe and a test. New work starts from a user report or a
+measured regression on the CI `bench` matrix.
 
 ## Closed decisions (do not reopen without a user report)
 

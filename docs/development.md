@@ -15,7 +15,9 @@ UV_PROJECT_ENVIRONMENT=.venv313 uv run -p 3.13 --group dev pytest -q   # asyncio
 `pytest-timeout` fails any test after 120 s (`[tool.pytest]`): a busy-looping
 `close()` hung every 3.13 CI job for 90 minutes in v0.6 development and a
 pre-fix local run for 8 hours. Run the 3.13 suite whenever `serving.py`
-changes; the asyncio differences are the v0.6.2 subject (`roadmap/next.md`).
+changes; `serving/asyncio.md` lists the scheduling facts it relies on and
+`uv run --no-project -p 3.13 tools/asyncio_probe.py` reproduces them on any
+interpreter (`-p 3.11`, `3.12`, `3.14` likewise).
 
 ## Fixtures (reference stack, never needed at runtime)
 

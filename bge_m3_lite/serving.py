@@ -208,21 +208,25 @@ class AsyncEmbedder:
             self._waiting_calls -= 1
             self._queued -= requests
         self.in_flight += 1
-        try:
-            fut = asyncio.get_running_loop().run_in_executor(
-                self._executor,
-                functools.partial(self.embedder.encode, texts, **self._kwargs(options)),
-            )
-            self._running.add(fut)
-            try:
-                return await fut
-            finally:
-                self._running.discard(fut)
-        finally:
-            self.in_flight -= 1
-            self._slots.release()
-            for pending in list(self._pending.values()):  # a slot is free
-                self._flush(pending)
+        fut = asyncio.get_running_loop().run_in_executor(
+            self._executor,
+            functools.partial(self.embedder.encode, texts, **self._kwargs(options)),
+        )
+        self._running.add(fut)
+        fut.add_done_callback(self._call_returned)
+        # A cancelled caller (asyncio.timeout, a client gone) cannot stop the
+        # thread: shield keeps the future, the slot and in_flight until the
+        # call returns, so close() waits in the loop instead of blocking in
+        # executor.shutdown (docs/serving/asyncio.md).
+        return await asyncio.shield(fut)
+
+    def _call_returned(self, fut: asyncio.Future[Any]) -> None:
+        """Done-callback of an ``encode`` call: free the slot, start what waited."""
+        self._running.discard(fut)
+        self.in_flight -= 1
+        self._slots.release()
+        for pending in list(self._pending.values()):  # a slot is free
+            self._flush(pending)
 
     async def _enqueue(self, texts: str | Sequence[str], options: _Options) -> Any:
         """Join the pending group for these options and length bucket; it

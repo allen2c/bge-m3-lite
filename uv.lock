@@ -208,7 +208,7 @@ wheels = [
 
 [[package]]
 name = "bge-m3-lite"
-version = "0.6.1"
+version = "0.6.2"
 source = { editable = "." }
 dependencies = [
     { name = "onnxruntime" },
@@ -253,7 +253,7 @@ dev = [
     { name = "pyproject-fmt", specifier = ">=2" },
     { name = "pyright", specifier = ">=1.1" },
     { name = "pytest", specifier = ">=8" },
-    { name = "pytest-timeout", specifier = ">=2.4.0" },
+    { name = "pytest-timeout", specifier = ">=2.4" },
     { name = "ruff", specifier = ">=0.6" },
 ]
 quant = [{ name = "bge-m3-lite", extras = ["quant"] }]

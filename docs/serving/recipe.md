@@ -47,7 +47,11 @@ in the embedder's pool (private, sized `max_concurrency`); one
 built; a wrapped embedder stays open). Uvicorn `--workers N` gives N model
 copies: memory is N × (RSS after load + activations, below), and
 `BGEM3Embedder(low_memory=True)` shares the weight pages between the workers
-at 2× the single-query latency (`../resources.md`).
+at 2× the single-query latency (`../resources.md`). A request cancelled while
+its call runs (`asyncio.timeout`, a client gone) keeps its slot until the
+thread returns: nothing can stop `session.run`, so `in_flight` stays honest
+and `close()` waits in the loop (`asyncio.md` lists every scheduling fact
+the class relies on, per Python version).
 
 ## Defaults and the micro-batcher
 

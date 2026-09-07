@@ -15,8 +15,8 @@
   the development Mac is not representative and runners can disagree with
   it) and record the numbers in `docs/`; do not rely on memory. Benchmark
   with nothing else running (`ps` for stale pytest processes first).
-- Test on Python 3.11 and 3.13 (asyncio differs; `pytest-timeout` caps a
-  test at 120 s; see `docs/development.md`).
+- Test on Python 3.11 and 3.13 (asyncio changed at 3.12: `docs/serving/asyncio.md`;
+  `pytest-timeout` caps a test at 120 s; see `docs/development.md`).
 - Docs stay under 100 lines each (150 max); split into folders instead.
 
 ## Commands
@@ -42,7 +42,8 @@ uv run tools/bench_serving.py --precision int8  # serving numbers, run alone
 | `memory.md` | attention `Loop` (chunk 256) + layer tail in a row `Loop` (`--tail`, `--tail-rows`); activation memory per padded token, `max_batch_tokens` |
 | `resources.md` | resident memory, CPU-seconds per token and per request, threads, idle CPU, `low_memory`, start-up |
 | `serving/recipe.md`, `measurements.md` | `AsyncEmbedder` for FastAPI: defaults, micro-batcher and its length buckets, workers × memory; req/s tables (M4, CI runners), `run_async` verdict |
+| `serving/asyncio.md` | the asyncio scheduling facts `serving.py` relies on: 3.11 versus 3.12+ behaviour, CPython change, the test that pins each; `tools/asyncio_probe.py` output |
 | `verification.md` | accuracy, platforms, throughput, start-up, memory |
 | `development.md` | fixtures, CI bench inputs, Python 3.13 check, release and asset upload |
-| `roadmap/done.md` | shipped versions and the facts behind them |
-| `roadmap/next.md` | v0.6.2 plan (asyncio 3.11 vs 3.13), closed decisions, later candidates |
+| `roadmap/done.md`, `done-early.md` | shipped versions and the facts behind them (v0.5+; v0.1–v0.4) |
+| `roadmap/next.md` | open candidates and closed decisions |
