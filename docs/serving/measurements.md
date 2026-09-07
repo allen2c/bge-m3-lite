@@ -29,7 +29,7 @@ its next request when the previous one returns; latency as seen by a client.
 Reading (details in `recipe.md`): fp32 is GEMM-bound — two runs in flight fill the gaps a
 9-token query leaves in 4 threads (+45 % at the same CPU per request), more
 only adds latency, and padding queries into one call is what scales (2.5× at
-4, 3.6× at 8). int8 runs 2 700 small ops per query and scales with runs in
+4, 3.6× at 8). int8 runs 1 400 small ops per query (2 700 before v0.6.1) and scales with runs in
 flight instead (2.1× at 4, 2.4× at 8; batching loses at every size). For
 passages both precisions gain 25–40 % from 2–4 runs in flight and nothing
 from batching. Four 1-thread sessions lose to one 4-thread session except

@@ -12,9 +12,10 @@ uv build                                        # pure-Python wheel (~30 KB)
 UV_PROJECT_ENVIRONMENT=.venv313 uv run -p 3.13 --group dev pytest -q   # asyncio differs per version
 ```
 
-The 3.13 run needs a watchdog when touching `serving.py` (a busy-looping
-`close()` hung every 3.13 CI job for 90 minutes in v0.6 development):
-`python -c "import subprocess; subprocess.run([...], timeout=120)"`.
+`pytest-timeout` fails any test after 120 s (`[tool.pytest]`): a busy-looping
+`close()` hung every 3.13 CI job for 90 minutes in v0.6 development and a
+pre-fix local run for 8 hours. Run the 3.13 suite whenever `serving.py`
+changes; the asyncio differences are the v0.6.2 subject (`roadmap/next.md`).
 
 ## Fixtures (reference stack, never needed at runtime)
 

@@ -26,7 +26,7 @@ Formulas follow `FlagEmbedding/inference/embedder/encoder_only/m3.py` and
 | `_torch_pickle.py` | torch-free loader for the two `.pt` heads (strict class allowlist) |
 | `hub.py` | pinned file table, SHA-256, resumable download, cross-process lock |
 | `model.py` | `OnnxBackbone`: ORT session, CPU provider, `ORT_ENABLE_ALL`, no thread spinning, P-core thread default, `low_memory` = no prepacking (`resources.md`) |
-| `fuse.py`, `quantize.py`, `calibration*.txt` | build-time only (`quant` extra): fused fp32 graph, SmoothQuant + int8 backbone, chunked attention (`memory.md`, `calibration.md`) |
+| `fuse.py`, `quantize.py`, `calibration*.txt` | build-time only (`quant` extra): fused fp32 graph, SmoothQuant + int8 backbone, chunked attention + row-loop layer tail (`memory.md`, `calibration.md`) |
 | `embedder.py` | `BGEM3Embedder`: batching (longest first, text + token budget), pooling, `compute_score` |
 | `serving.py` | `AsyncEmbedder`: asyncio front-end — own thread pool, bounded in-flight calls, optional micro-batching (`serving/recipe.md`) |
 | `cli.py` | `bge-m3-lite download / info / encode / fuse / quantize` |

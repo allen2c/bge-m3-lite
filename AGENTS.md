@@ -12,9 +12,11 @@
 - fp32 outputs must match FlagEmbedding: `tests/fixtures/` is the contract;
   `AsyncEmbedder` must stay bit-exact with the synchronous API.
 - Verify claims empirically (CI `bench` matrix for anything platform-specific;
-  the development Mac is not representative) and record the numbers in
-  `docs/`; do not rely on memory. Benchmark with nothing else running.
-- Test on Python 3.11 and 3.13 (asyncio differs; see `docs/development.md`).
+  the development Mac is not representative and runners can disagree with
+  it) and record the numbers in `docs/`; do not rely on memory. Benchmark
+  with nothing else running (`ps` for stale pytest processes first).
+- Test on Python 3.11 and 3.13 (asyncio differs; `pytest-timeout` caps a
+  test at 120 s; see `docs/development.md`).
 - Docs stay under 100 lines each (150 max); split into folders instead.
 
 ## Commands
@@ -23,6 +25,7 @@
 uv sync --group dev --group quant
 uv run ruff format . && uv run ruff check . && uv run pyright
 uv run pyproject-fmt --check pyproject.toml && uv run pytest
+UV_PROJECT_ENVIRONMENT=.venv313 uv run -p 3.13 --group dev pytest -q
 BGE_M3_LITE_RUN_SLOW=1 uv run pytest -m slow    # full model, 2.3 GB cache
 uv run tools/bench_serving.py --precision int8  # serving numbers, run alone
 ```
@@ -36,10 +39,10 @@ uv run tools/bench_serving.py --precision int8  # serving numbers, run alone
 | `fusion.md` | fused fp32 graph: what ships, how it is built |
 | `quantization/recipe.md`, `measurements.md` | int8 backbone: SmoothQuant + row-wise scheme; accuracy and speed per platform |
 | `calibration.md` | calibration texts (sources, licence), held-out evaluation set |
-| `memory.md` | attention `Loop` (chunk 256) + layer tail in a row `Loop`; activation memory per padded token, `max_batch_tokens` |
-| `resources.md` | resident memory, CPU-seconds per token and per request, threads, idle CPU, `low_memory` |
-| `serving/recipe.md`, `measurements.md` | `AsyncEmbedder` for FastAPI: defaults, micro-batcher, workers × memory; req/s tables (M4, CI runners) |
+| `memory.md` | attention `Loop` (chunk 256) + layer tail in a row `Loop` (`--tail`, `--tail-rows`); activation memory per padded token, `max_batch_tokens` |
+| `resources.md` | resident memory, CPU-seconds per token and per request, threads, idle CPU, `low_memory`, start-up |
+| `serving/recipe.md`, `measurements.md` | `AsyncEmbedder` for FastAPI: defaults, micro-batcher and its length buckets, workers × memory; req/s tables (M4, CI runners), `run_async` verdict |
 | `verification.md` | accuracy, platforms, throughput, start-up, memory |
 | `development.md` | fixtures, CI bench inputs, Python 3.13 check, release and asset upload |
 | `roadmap/done.md` | shipped versions and the facts behind them |
-| `roadmap/next.md` | closed decisions (`run_async`, arena, `If` bypass) and later candidates |
+| `roadmap/next.md` | v0.6.2 plan (asyncio 3.11 vs 3.13), closed decisions, later candidates |
